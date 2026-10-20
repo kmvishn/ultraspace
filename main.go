@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"ultraspace/internal/agent"
 	"ultraspace/internal/config"
 	"ultraspace/internal/server"
+	"ultraspace/internal/store"
 	"ultraspace/internal/sysmem"
 )
 
@@ -23,6 +25,10 @@ var version = "dev"
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "agent" {
 		runAgent(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "reset-pattern" {
+		resetPattern(os.Args[2:])
 		return
 	}
 	configPath := flag.String("config", "/etc/ultraspace/config.toml", "path to the config file (missing file = defaults)")
@@ -64,6 +70,39 @@ func main() {
 		log.Error("server", "err", err)
 		os.Exit(1)
 	}
+}
+
+// resetPattern turns off a user's pattern lock, for when it is forgotten:
+// sudo -u ultraspace ultraspace reset-pattern -user NAME
+func resetPattern(args []string) {
+	fs := flag.NewFlagSet("reset-pattern", flag.ExitOnError)
+	configPath := fs.String("config", "/etc/ultraspace/config.toml", "config file")
+	user := fs.String("user", "", "the account whose pattern lock to turn off")
+	_ = fs.Parse(args)
+	cfg, err := config.Load(*configPath)
+	if err == nil {
+		err = cfg.Finalize()
+	}
+	if err != nil || *user == "" {
+		fmt.Fprintln(os.Stderr, "usage: ultraspace reset-pattern -user NAME [-config FILE]", err)
+		os.Exit(2)
+	}
+	st, err := store.Open(filepath.Join(cfg.DataDir, "ultraspace.db"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "open database:", err)
+		os.Exit(1)
+	}
+	defer st.Close()
+	ok, err := st.ClearPatternByName(context.Background(), *user)
+	switch {
+	case err != nil:
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	case !ok:
+		fmt.Fprintf(os.Stderr, "no user %q\n", *user)
+		os.Exit(1)
+	}
+	fmt.Printf("Pattern lock turned off for %s. They can sign in with the password alone.\n", *user)
 }
 
 // runAgent is "ultraspace agent": the Terminal and VS Code backend, run as a login user.

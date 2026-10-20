@@ -846,3 +846,71 @@ func TestVideoPlayerModes(t *testing.T) {
 	}
 	res.Body.Close()
 }
+
+func TestPatternLock(t *testing.T) {
+	c, cfg := setup(t)
+	c.do("POST", "/api/setup", map[string]string{"token": token(t, cfg), "username": "admin", "password": "correct-horse-1"}, nil)
+
+	if code, _ := c.do("POST", "/api/account/pattern", map[string]string{"password": "wrong", "pattern": "0,4,8,5"}, nil); code != 403 {
+		t.Fatalf("set pattern with a wrong password = %d", code)
+	}
+	if code, _ := c.do("POST", "/api/account/pattern", map[string]string{"password": "correct-horse-1", "pattern": "0,1,2"}, nil); code != 400 {
+		t.Fatalf("3-dot pattern accepted: %d", code)
+	}
+	if code, _ := c.do("POST", "/api/account/pattern", map[string]string{"password": "correct-horse-1", "pattern": "0,4,8,5"}, nil); code != 200 {
+		t.Fatalf("set pattern = %d", code)
+	}
+	if _, me := c.do("GET", "/api/me", nil, nil); me["pattern"] != true {
+		t.Fatalf("me = %v", me)
+	}
+
+	// A new device: the password alone gives a ticket, not a session.
+	jar, _ := cookiejar.New(nil)
+	d := &client{t: t, base: c.base, http: &http.Client{Jar: jar}}
+	_, out := d.do("POST", "/api/login", map[string]string{"username": "admin", "password": "correct-horse-1"}, nil)
+	ticket, _ := out["ticket"].(string)
+	if out["pattern_required"] != true || ticket == "" {
+		t.Fatalf("login = %v", out)
+	}
+	if code, _ := d.do("GET", "/api/me", nil, nil); code != 401 {
+		t.Fatalf("signed in before the pattern: %d", code)
+	}
+	if code, out := d.do("POST", "/api/login/pattern", map[string]string{"ticket": ticket, "pattern": "0,4,8,7"}, nil); code != 401 || out["tries_left"] != float64(4) {
+		t.Fatalf("wrong pattern = %d %v", code, out)
+	}
+	if code, _ := d.do("POST", "/api/login/pattern", map[string]string{"ticket": ticket, "pattern": "0,4,8,5"}, nil); code != 200 {
+		t.Fatalf("right pattern = %d", code)
+	}
+	if code, _ := d.do("GET", "/api/me", nil, nil); code != 200 {
+		t.Fatalf("not signed in after the pattern: %d", code)
+	}
+	if code, _ := d.do("POST", "/api/login/pattern", map[string]string{"ticket": ticket, "pattern": "0,4,8,5"}, nil); code != 401 {
+		t.Fatalf("ticket reused: %d", code)
+	}
+
+	// Five wrong patterns void the ticket.
+	jar2, _ := cookiejar.New(nil)
+	e := &client{t: t, base: c.base, http: &http.Client{Jar: jar2}}
+	_, out = e.do("POST", "/api/login", map[string]string{"username": "admin", "password": "correct-horse-1"}, nil)
+	ticket = out["ticket"].(string)
+	var last map[string]any
+	for i := 0; i < 5; i++ {
+		_, last = e.do("POST", "/api/login/pattern", map[string]string{"ticket": ticket, "pattern": "8,7,6,3"}, nil)
+	}
+	if last["restart"] != true {
+		t.Fatalf("after 5 wrong patterns = %v", last)
+	}
+	if code, _ := e.do("POST", "/api/login/pattern", map[string]string{"ticket": ticket, "pattern": "0,4,8,5"}, nil); code != 401 {
+		t.Fatalf("voided ticket still works: %d", code)
+	}
+
+	// Turning it off.
+	if code, _ := c.do("POST", "/api/account/pattern", map[string]string{"password": "correct-horse-1", "pattern": ""}, nil); code != 200 {
+		t.Fatalf("remove pattern = %d", code)
+	}
+	jar3, _ := cookiejar.New(nil)
+	f := &client{t: t, base: c.base, http: &http.Client{Jar: jar3}}
+	if code, out := f.do("POST", "/api/login", map[string]string{"username": "admin", "password": "correct-horse-1"}, nil); code != 200 || out["pattern_required"] != nil {
+		t.Fatalf("login without pattern = %d %v", code, out)
+	}
+}

@@ -2,6 +2,7 @@ import { h, icon, api, on, settings, ApiError } from './core.js';
 import { buildDesktop, applyAppearance } from './desktop.js';
 import { startSession, flushSession, stopSession } from './session.js';
 import { stopEvents } from './clipboard.js';
+import { patternPad } from './pattern.js';
 import './apps/files.js';
 import './apps/system.js';
 import './apps/music.js';
@@ -91,7 +92,10 @@ function lockScreen(mode) {
       submit.disabled = true;
       try {
         if (mode === 'setup') await api('POST', '/api/setup', { token: v.token.trim(), username: v.username, password: v.password });
-        else await api('POST', '/api/login', { username: v.username, password: v.password });
+        else {
+          const res = await api('POST', '/api/login', { username: v.username, password: v.password });
+          if (res.pattern_required) { patternStep(res.ticket, v.username); return; }
+        }
         bg.classList.add('unlocking');
         setTimeout(boot, 280);
       } catch (err) {
@@ -112,7 +116,35 @@ function lockScreen(mode) {
   ]),
   error);
 
-  bg.append(h('div', { class: 'lock-clock' }, time, date), h('div', { class: 'lock-card glass' }, form));
+  const card = h('div', { class: 'lock-card glass' }, form);
+
+  // Second step when the pattern lock is on: the password was right, now the pattern.
+  function patternStep(ticket, username) {
+    const msg = h('div', { class: 'lock-sub' }, 'Draw your pattern');
+    const pad = patternPad({
+      onDone: async (seq) => {
+        if (seq.length < 4) { msg.textContent = 'Join at least 4 dots'; pad.error(); return; }
+        try {
+          await api('POST', '/api/login/pattern', { ticket, pattern: seq.join(',') });
+          pad.ok();
+          bg.classList.add('unlocking');
+          setTimeout(boot, 280);
+        } catch (err) {
+          pad.error();
+          if (/password again/.test(err.message)) {
+            setTimeout(() => { card.replaceChildren(form); submit.disabled = false; error.textContent = err.message; inputs.password.value = ''; inputs.password.focus(); }, 900);
+            msg.textContent = err.message;
+          } else msg.textContent = 'Wrong pattern. Try again.';
+        }
+      },
+    });
+    card.replaceChildren(h('div', { class: 'lock-form lock-pattern' },
+      h('div', { class: 'lock-avatar' }, h('span', { class: 'avatar big' }, username.slice(0, 1).toUpperCase())),
+      h('div', { class: 'lock-title' }, username), msg, pad.el,
+      h('button', { class: 'link-btn lock-back', type: 'button', onclick: () => { card.replaceChildren(form); submit.disabled = false; inputs.password.value = ''; inputs.password.focus(); } }, 'Use the password again')));
+  }
+
+  bg.append(h('div', { class: 'lock-clock' }, time, date), card);
   app.replaceChildren(bg);
   Object.values(inputs)[0].focus();
 }

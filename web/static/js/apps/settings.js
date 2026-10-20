@@ -1,5 +1,6 @@
-import { h, icon, api, toast, report, confirmDialog, settings, system, on, fmtBytes, fmtDuration, fmtAgo, fmtDate, baseOf, fileUrl, emit } from '../core.js';
+import { h, icon, api, toast, report, confirmDialog, dialog, settings, system, on, fmtBytes, fmtDuration, fmtAgo, fmtDate, baseOf, fileUrl, emit } from '../core.js';
 import { deviceName } from '../session.js';
+import { patternPad } from '../pattern.js';
 import { registerApp, openApp } from '../wm.js';
 import { WALLPAPERS, ACCENTS } from '../desktop.js';
 
@@ -103,8 +104,83 @@ function mountSettings(win, args) {
         h('div', null, h('div', { class: 'account-name' }, window.ultraspaceUser?.username || ''), h('div', { class: 'set-desc' }, 'Administrator')),
         h('div', { class: 'tb-spacer' }),
         h('button', { class: 'btn', onclick: () => emit('signout') }, icon('logOut', 15), 'Sign out'))),
-      group('Password', 'Changing your password signs out every other device.', form)));
+      group('Password', 'Changing your password signs out every other device.', form),
+      patternGroup()));
     return null;
+  }
+
+  // ---------- pattern lock ----------
+
+  function patternGroup() {
+    const on = !!window.ultraspaceUser?.pattern;
+    const box = h('div', { class: 'switch-row pattern-row' },
+      h('span', null, h('b', null, on ? 'Pattern lock is on' : 'Pattern lock is off'),
+        h('span', { class: 'set-desc' }, on
+          ? 'After your password, sign-in asks for your pattern. Forgot it? On the server run: sudo -u ultraspace ultraspace reset-pattern -user ' + (window.ultraspaceUser?.username || 'NAME')
+          : 'Ask for a 3×3 pattern after the password when signing in. A stolen password alone is then not enough.')),
+      h('div', { class: 'hero-actions' },
+        h('button', { class: `btn ${on ? '' : 'primary'}`, onclick: () => setupPattern() }, on ? 'Change' : 'Set up'),
+        on ? h('button', { class: 'btn', onclick: () => removePattern() }, 'Turn off') : null));
+    return group('Pattern lock', null, box);
+  }
+
+  function setupPattern() {
+    let first = null;
+    const msg = h('p', { class: 'dialog-text pattern-msg' }, 'Draw a pattern joining at least 4 dots.');
+    const pwd = h('input', { class: 'input hidden', type: 'password', placeholder: 'Your current password', autocomplete: 'current-password' });
+    const save = h('button', { class: 'btn primary', disabled: true }, 'Save');
+    const pad = patternPad({
+      onDone: (seq) => {
+        if (seq.length < 4) { msg.textContent = 'Join at least 4 dots. Try again.'; pad.error(); return; }
+        if (!first) { first = seq.join(','); msg.textContent = 'Draw it again to confirm.'; setTimeout(() => pad.clear(), 350); return; }
+        if (seq.join(',') !== first) { first = null; msg.textContent = 'The patterns did not match. Start again.'; pad.error(); return; }
+        pad.ok();
+        msg.textContent = 'Pattern confirmed. Enter your password to save it.';
+        pwd.classList.remove('hidden');
+        save.disabled = false;
+        pwd.focus();
+      },
+    });
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      try {
+        await api('POST', '/api/account/pattern', { password: pwd.value, pattern: first });
+        window.ultraspaceUser.pattern = true;
+        close();
+        toast('Pattern lock is on');
+        show('account');
+      } catch (err) { msg.textContent = err.message; save.disabled = false; }
+    });
+    pwd.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !save.disabled) save.click(); });
+    const close = dialog({
+      title: window.ultraspaceUser?.pattern ? 'Change pattern' : 'Set up pattern lock', width: '360px',
+      body: h('div', { class: 'pattern-setup' }, msg, pad.el, pwd),
+      actions: [h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), save],
+    });
+  }
+
+  function removePattern() {
+    const pwd = h('input', { class: 'input', type: 'password', placeholder: 'Your current password', autocomplete: 'current-password' });
+    const msg = h('div', { class: 'form-error' });
+    const ok = h('button', {
+      class: 'btn danger-solid',
+      onclick: async () => {
+        try {
+          await api('POST', '/api/account/pattern', { password: pwd.value, pattern: '' });
+          window.ultraspaceUser.pattern = false;
+          close();
+          toast('Pattern lock is off');
+          show('account');
+        } catch (err) { msg.textContent = err.message; }
+      },
+    }, 'Turn off');
+    pwd.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok.click(); });
+    const close = dialog({
+      title: 'Turn off pattern lock?', width: '360px',
+      body: h('div', null, h('p', { class: 'dialog-text' }, 'Sign-in will ask only for your password.'), pwd, msg),
+      actions: [h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), ok],
+    });
+    requestAnimationFrame(() => pwd.focus());
   }
 
   function devices(el) {

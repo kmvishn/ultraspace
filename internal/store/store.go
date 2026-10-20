@@ -38,6 +38,7 @@ type User struct {
 	ID           int64
 	Username     string
 	PasswordHash string
+	PatternHash  string // optional 3x3 pattern asked for after the password; "" when off
 	CreatedAt    time.Time
 }
 
@@ -105,7 +106,35 @@ func migrate(db *sql.DB) error {
 			}
 		}
 	}
-	return nil
+	return addColumn(db, "users", "pattern_hash", "TEXT NOT NULL DEFAULT ''")
+}
+
+func addColumn(db *sql.DB, table, column, def string) error {
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('`+table+`') WHERE name = ?`, column).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	_, err := db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + def)
+	return err
+}
+
+// SetPattern stores the pattern lock's hash ("" turns it off).
+func (s *Store) SetPattern(ctx context.Context, userID int64, hash string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET pattern_hash = ? WHERE id = ?`, hash, userID)
+	return err
+}
+
+// ClearPatternByName turns the pattern lock off (the recovery command uses it).
+func (s *Store) ClearPatternByName(ctx context.Context, username string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET pattern_hash = '' WHERE username = ?`, username)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 func Open(path string) (*Store, error) {
@@ -148,18 +177,18 @@ func (s *Store) CreateUser(ctx context.Context, username, hash string) (User, er
 
 func (s *Store) UserByName(ctx context.Context, username string) (User, error) {
 	return s.scanUser(s.db.QueryRowContext(ctx,
-		`SELECT id, username, password_hash, created_at FROM users WHERE username = ?`, username))
+		`SELECT id, username, password_hash, pattern_hash, created_at FROM users WHERE username = ?`, username))
 }
 
 func (s *Store) UserByID(ctx context.Context, id int64) (User, error) {
 	return s.scanUser(s.db.QueryRowContext(ctx,
-		`SELECT id, username, password_hash, created_at FROM users WHERE id = ?`, id))
+		`SELECT id, username, password_hash, pattern_hash, created_at FROM users WHERE id = ?`, id))
 }
 
 func (s *Store) scanUser(row *sql.Row) (User, error) {
 	var u User
 	var created int64
-	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &created)
+	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.PatternHash, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -186,11 +215,11 @@ func (s *Store) SessionUser(ctx context.Context, tokenHash []byte) (User, Sessio
 	var sess Session
 	var userCreated, created, expires, seen int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT u.id, u.username, u.password_hash, u.created_at,
+		`SELECT u.id, u.username, u.password_hash, u.pattern_hash, u.created_at,
 		        s.rowid, s.created_at, s.expires_at, s.last_seen, s.ip, s.user_agent
 		   FROM sessions s JOIN users u ON u.id = s.user_id
 		  WHERE s.token_hash = ? AND s.expires_at > ?`, tokenHash, time.Now().Unix()).
-		Scan(&u.ID, &u.Username, &u.PasswordHash, &userCreated,
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.PatternHash, &userCreated,
 			&sess.ID, &created, &expires, &seen, &sess.IP, &sess.UserAgent)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, Session{}, ErrNotFound
