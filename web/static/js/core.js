@@ -327,7 +327,7 @@ export function confirmDialog(title, text, okLabel = 'Delete', danger = true) {
 
 // ---------- settings ----------
 
-export const DEFAULTS = { theme: 'dark', accent: '#7c6cf2', wallpaper: 'aurora', transparency: true, filesView: 'grid' };
+export const DEFAULTS = { theme: 'dark', accent: '#7c6cf2', wallpaper: 'aurora', transparency: true, filesView: 'grid', buttons: 'right' };
 
 export const settings = {
   data: { ...DEFAULTS },

@@ -55,12 +55,15 @@ function mountSettings(win, args) {
           h('span', { class: `wall-prev wp-${w.id}` }), h('span', { class: 'wall-name' }, w.name))),
         custom ? h('button', { class: 'wall active' },
           h('span', { class: 'wall-prev wp-image', style: { backgroundImage: `url("${fileUrl(custom, true)}")` } }), h('span', { class: 'wall-name' }, baseOf(custom))) : null);
+      const buttonsSeg = h('div', { class: 'seg big' }, [['right', 'Right'], ['left', 'Left']].map(([id, label]) =>
+        h('button', { class: `seg-btn text ${(s.buttons || 'right') === id ? 'active' : ''}`, onclick: () => settings.set({ buttons: id }) }, label)));
       const glass = h('label', { class: 'switch-row' },
         h('span', null, h('b', null, 'Transparency'), h('span', { class: 'set-desc' }, 'Frosted-glass menu bar, dock and widgets. Turn off on slow devices.')),
         h('input', { type: 'checkbox', class: 'switch', checked: !!s.transparency, onchange: (e) => settings.set({ transparency: e.target.checked }) }));
       el.replaceChildren(h('div', { class: 'settings-page' },
         group('Theme', null, themeSeg),
         group('Accent colour', null, accents),
+        group('Window buttons', 'Minimise, maximise and close: on the right like Windows, or on the left like macOS.', buttonsSeg),
         group('Wallpaper', 'Or right-click any image in Files and choose “Set as wallpaper”.', walls,
           h('button', { class: 'btn small', onclick: () => openApp('files') }, icon('folder', 14), 'Choose from Files…')),
         group('Effects', null, glass)));

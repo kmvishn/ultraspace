@@ -28,6 +28,7 @@ export function applyAppearance(root, s) {
   const theme = s.theme === 'auto' ? (media.matches ? 'dark' : 'light') : s.theme;
   html.dataset.theme = theme;
   html.dataset.glass = s.transparency ? 'on' : 'off';
+  html.dataset.buttons = s.buttons === 'left' ? 'left' : 'right'; // window buttons: right (Windows) or left (macOS)
   if (/^#[0-9a-f]{6}$/i.test(s.accent)) html.style.setProperty('--accent', s.accent);
   if (!root) return;
   root.className = 'desktop';
