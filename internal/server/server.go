@@ -45,6 +45,7 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 	rb := remote.New(remote.Options{
 		ChromePath: cfg.Browser.Chrome, DataDir: cfg.DataDir, FilesRoot: cfg.FilesRoot,
 		Idle: cfg.Browser.Idle.Duration, NoSandbox: cfg.Browser.NoSandbox, Quality: cfg.Browser.Quality,
+		Profile: cfg.MemoryProfile,
 	}, log)
 	cleanup := func() { rb.Shutdown(); fm.Close(); st.Close() }
 
@@ -84,7 +85,12 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 		cleanup()
 		return nil, nil, err
 	}
-	mux.Handle("/", readOnly(noCache(http.FileServerFS(static))))
+	assets, err := loadStatic(static)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	mux.Handle("/", assets)
 
 	h := securityHeaders(csrf(cfg.PublicOrigin, proxy, logRequests(log, mux)))
 	return h, cleanup, nil
@@ -179,24 +185,6 @@ func csrf(public string, proxy httpx.Proxy, next http.Handler) http.Handler {
 			httpx.Error(w, http.StatusForbidden, "origin not allowed")
 			return
 		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func readOnly(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			w.Header().Set("Allow", "GET, HEAD")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func noCache(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache")
 		next.ServeHTTP(w, r)
 	})
 }

@@ -17,7 +17,12 @@ trust_proxy = true
 
 session_ttl = "720h"
 
+# How big the heavy apps may get: "auto" picks from total RAM ("tiny" up to 700 MB,
+# "small" up to 1.5 GB, "normal" above). It sets how many browser tabs stay loaded,
+# Chrome's process limit, and how soon idle Chrome and VS Code shut down.
+memory_profile = "auto"
+
 # Remote browser for the Browser app (chrome-headless-shell from Chrome for Testing).
 [browser]
 chrome = "/opt/ultraspace/chrome/chrome-headless-shell"
-idle = "10m"
+# idle = "5m"   # default comes from memory_profile

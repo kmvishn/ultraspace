@@ -14,7 +14,7 @@ RuntimeDirectoryMode=0700
 Restart=on-failure
 RestartSec=3
 # code-server and your builds run here; throttle before the host runs out of memory.
-MemoryHigh=700M
+MemoryHigh=70%
 
 [Install]
 WantedBy=multi-user.target

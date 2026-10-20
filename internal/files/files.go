@@ -123,6 +123,12 @@ type found struct {
 func (f *Files) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	kind := r.URL.Query().Get("kind")
+	// "cover" returns at most one image per folder (preferring cover.jpg, folder.png, …),
+	// so the Music app can find album art without listing every photo.
+	covers := kind == "cover"
+	if covers {
+		kind = "image"
+	}
 	exts, kindOK := kindExts[kind]
 	if kind != "" && !kindOK {
 		httpx.Error(w, http.StatusBadRequest, "unknown kind")
@@ -138,6 +144,7 @@ func (f *Files) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	results := []found{}
 	truncated := false
+	best := map[string]int{} // folder -> index in results (cover mode)
 	err := fs.WalkDir(f.root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries
@@ -152,7 +159,14 @@ func (f *Files) handleSearch(w http.ResponseWriter, r *http.Request) {
 		if kind != "" && (d.IsDir() || !slices.Contains(exts, path.Ext(name))) {
 			return nil
 		}
-		if len(results) >= limit {
+		dir := path.Dir(p)
+		score := coverScore(name)
+		if covers {
+			if i, ok := best[dir]; ok && coverScore(strings.ToLower(results[i].Name)) >= score {
+				return nil
+			}
+		}
+		if _, replacing := best[dir]; len(results) >= limit && !(covers && replacing) {
 			truncated = true
 			return fs.SkipAll
 		}
@@ -164,6 +178,13 @@ func (f *Files) handleSearch(w http.ResponseWriter, r *http.Request) {
 		if !d.IsDir() {
 			e.Size = info.Size()
 		}
+		if covers {
+			if i, ok := best[dir]; ok {
+				results[i] = e
+				return nil
+			}
+			best[dir] = len(results)
+		}
 		results = append(results, e)
 		return nil
 	})
@@ -172,6 +193,17 @@ func (f *Files) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"results": results, "truncated": truncated})
+}
+
+// coverScore ranks image names as album art: cover > folder/front/album > anything else.
+func coverScore(name string) int {
+	switch strings.TrimSuffix(name, path.Ext(name)) {
+	case "cover":
+		return 3
+	case "folder", "front", "album", "albumart":
+		return 2
+	}
+	return 1
 }
 
 // rel turns a client path like "/a/b" into a root-relative path ("a/b", or "." for the root).

@@ -1,8 +1,5 @@
 // Terminal: shells that run on the server as your Linux user. Sessions keep running
 // when the window closes or the device sleeps; reopening reattaches with recent output.
-import { Terminal } from '../../vendor/xterm/xterm.mjs';
-import { FitAddon } from '../../vendor/xterm/addon-fit.mjs';
-import { WebLinksAddon } from '../../vendor/xterm/addon-web-links.mjs';
 import { h, icon, api, report, toast, menu, confirmDialog, debounce } from '../core.js';
 import { registerApp } from '../wm.js';
 
@@ -11,11 +8,19 @@ registerApp({
   mount(win, args) { return mountTerminal(win, args); },
 });
 
-let cssLoaded = false;
-function loadCss() {
-  if (cssLoaded) return;
-  cssLoaded = true;
-  document.head.append(h('link', { rel: 'stylesheet', href: 'vendor/xterm/xterm.css' }));
+// xterm.js (~350 KB) loads the first time a Terminal opens, not with the desktop.
+let Terminal, FitAddon, WebLinksAddon;
+let libs = null;
+function loadXterm() {
+  libs ||= Promise.all([
+    import('../../vendor/xterm/xterm.mjs'),
+    import('../../vendor/xterm/addon-fit.mjs'),
+    import('../../vendor/xterm/addon-web-links.mjs'),
+  ]).then(([x, f, l]) => {
+    ({ Terminal } = x); ({ FitAddon } = f); ({ WebLinksAddon } = l);
+    document.head.append(h('link', { rel: 'stylesheet', href: 'vendor/xterm/xterm.css' }));
+  });
+  return libs;
 }
 
 const THEME = {
@@ -28,7 +33,6 @@ const enc = new TextEncoder();
 let toldKeepsRunning = false;
 
 function mountTerminal(win, args) {
-  loadCss();
   const tabs = []; // { id, title, term, fit, el, ws, exited, retry, timer }
   let active = null;
   let destroyed = false;
@@ -54,6 +58,7 @@ function mountTerminal(win, args) {
 
   async function start() {
     try {
+      await loadXterm();
       const st = await api('GET', '/api/agent/status');
       if (!st.available) {
         showEmpty('The terminal service is not running on this server.', 'It is installed with ultraspace as the "ultraspace-agent" service.');
@@ -74,6 +79,7 @@ function mountTerminal(win, args) {
   }
 
   async function create() {
+    await loadXterm();
     const size = guessSize();
     try {
       const s = await api('POST', '/api/term/sessions', size);

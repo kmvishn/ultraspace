@@ -2,7 +2,6 @@ package remote
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,10 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"ultraspace/internal/sysmem"
 )
 
 // Tab is one page of the remote browser, as shown in the tab strip.
@@ -24,8 +26,11 @@ type Tab struct {
 	Loading bool   `json:"loading"`
 	CanBack bool   `json:"can_back"`
 	CanFwd  bool   `json:"can_fwd"`
+	// Asleep tabs have been closed to save memory; they reload when opened.
+	Asleep bool `json:"asleep"`
 
-	session string
+	session    string
+	lastActive time.Time
 }
 
 type viewport struct {
@@ -55,12 +60,15 @@ type instance struct {
 	idle      *time.Timer
 	dialogs   map[string]string // session -> dialog message currently open
 	downloads map[string]string // guid -> file name
+	waking    string            // sleeping tab currently being reloaded
+	closing   bool              // shutting down: the saved tab list is final
 	stopped   chan struct{}
 	stopOnce  sync.Once
 }
 
 type savedTabs struct {
 	URLs   []string `json:"urls"`
+	Titles []string `json:"titles"`
 	Active int      `json:"active"`
 }
 
@@ -101,11 +109,15 @@ func (m *Manager) launch(userID int64) (*instance, error) {
 		"--webrtc-ip-handling-policy=disable_non_proxied_udp",
 		"--user-agent=" + m.userAgent,
 		"--no-first-run", "--no-default-browser-check", "--password-store=basic", "--use-mock-keychain",
-		"--disable-gpu", "--disable-dev-shm-usage", "--disable-extensions", "--disable-component-update",
+		"--disable-gpu", "--disable-software-rasterizer", "--disable-dev-shm-usage", "--disable-extensions", "--disable-component-update",
 		"--disable-background-networking", "--disable-sync", "--disable-default-apps", "--disable-breakpad",
-		"--disable-features=Translate,MediaRouter,OptimizationHints,DialMediaRouteProvider,AutofillServerCommunication",
-		"--renderer-process-limit=4", "--mute-audio", "--lang=en-US",
+		"--disable-features=Translate,MediaRouter,OptimizationHints,DialMediaRouteProvider,AutofillServerCommunication,BackForwardCache",
+		fmt.Sprintf("--renderer-process-limit=%d", m.prof.RendererLimit), "--mute-audio", "--lang=en-US",
 		"--window-size=1280,800",
+	}
+	if m.prof.Name == "tiny" {
+		// A smaller young generation trades a little speed for memory.
+		args = append(args, "--js-flags=--max-semi-space-size=1")
 	}
 	if m.opts.NoSandbox {
 		args = append(args, "--no-sandbox")
@@ -130,6 +142,7 @@ func (m *Manager) launch(userID int64) (*instance, error) {
 	}
 	cmdR.Close()
 	outW.Close()
+	sysmem.PreferOOMKill(cmd.Process.Pid, 500)
 
 	in := &instance{
 		m: m, userID: userID, dir: dir, cmd: cmd, conn: newCDP(outR, cmdW), proxy: proxy, log: m.log,
@@ -144,6 +157,7 @@ func (m *Manager) launch(userID int64) (*instance, error) {
 		in.shutdown()
 	}()
 	go in.eventLoop()
+	go in.sleepLoop()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -155,18 +169,19 @@ func (m *Manager) launch(userID int64) (*instance, error) {
 		"behavior": "allow", "downloadPath": downloads, "eventsEnabled": true,
 	}, nil)
 	in.restoreTabs(ctx)
-	m.log.Info("remote browser started", "user", userID, "pid", cmd.Process.Pid)
+	m.log.Info("remote browser started", "profile", m.prof.Name, "user", userID, "pid", cmd.Process.Pid)
 	return in, nil
 }
 
-// restoreTabs reopens the tabs saved when Chrome last stopped.
+// restoreTabs reopens the tabs saved when Chrome last stopped. Only the active one
+// loads; the others come back asleep and load when opened, so a restart is cheap.
 func (in *instance) restoreTabs(ctx context.Context) {
 	var saved savedTabs
 	b, err := os.ReadFile(filepath.Join(in.dir, "tabs.json"))
 	if err != nil || json.Unmarshal(b, &saved) != nil || len(saved.URLs) == 0 {
 		return
 	}
-	// Wait briefly for the initial about:blank tab, then reuse it for the first URL.
+	// Wait briefly for the initial about:blank tab, then reuse it for the active URL.
 	var first string
 	for i := 0; i < 50 && first == ""; i++ {
 		in.mu.Lock()
@@ -178,32 +193,34 @@ func (in *instance) restoreTabs(ctx context.Context) {
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
-	var ids []string
+	if first == "" {
+		return
+	}
+	active := min(max(saved.Active, 0), len(saved.URLs)-1)
+	in.mu.Lock()
+	order := make([]string, 0, len(saved.URLs))
 	for i, u := range saved.URLs {
-		if !allowedURL(u) {
+		if !allowedURL(u) && i != active {
 			continue
 		}
-		if i == 0 && first != "" {
-			ids = append(ids, first)
-			in.mu.Lock()
-			t := in.tabs[first]
-			in.mu.Unlock()
-			if t != nil {
-				go in.navigateTab(first, u)
-			}
+		if i == active {
+			order = append(order, first)
 			continue
 		}
-		var res struct {
-			TargetID string `json:"targetId"`
+		title := ""
+		if i < len(saved.Titles) {
+			title = saved.Titles[i]
 		}
-		if err := in.conn.Call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank", "background": true}, &res); err == nil {
-			ids = append(ids, res.TargetID)
-			go in.navigateTab(res.TargetID, u)
-		}
+		id := fmt.Sprintf("sleep-%d-%d", time.Now().UnixNano(), i)
+		in.tabs[id] = &Tab{ID: id, URL: u, Title: title, Asleep: true}
+		order = append(order, id)
 	}
-	if saved.Active >= 0 && saved.Active < len(ids) {
-		in.activate(ids[saved.Active])
+	in.order = order
+	in.mu.Unlock()
+	if allowedURL(saved.URLs[active]) {
+		go in.navigateTab(first, saved.URLs[active])
 	}
+	in.broadcastTabs()
 }
 
 func (in *instance) navigateTab(id, u string) {
@@ -216,6 +233,13 @@ func (in *instance) navigateTab(id, u string) {
 		}
 		in.mu.Unlock()
 		if sess != "" {
+			// Record where the tab is going now, so it can sleep (and wake) correctly
+			// even before Chrome reports the new address.
+			in.mu.Lock()
+			if t := in.tabs[id]; t != nil {
+				t.URL = u
+			}
+			in.mu.Unlock()
 			in.conn.Send(sess, "Page.navigate", map[string]string{"url": u})
 			return
 		}
@@ -225,8 +249,12 @@ func (in *instance) navigateTab(id, u string) {
 
 func (in *instance) saveTabs() {
 	in.mu.Lock()
+	if in.closing {
+		in.mu.Unlock()
+		return
+	}
 	st := savedTabs{Active: 0}
-	for i, id := range in.order {
+	for _, id := range in.order {
 		t := in.tabs[id]
 		if t == nil || !allowedURL(t.URL) {
 			continue
@@ -234,8 +262,8 @@ func (in *instance) saveTabs() {
 		if id == in.active {
 			st.Active = len(st.URLs)
 		}
-		_ = i
 		st.URLs = append(st.URLs, t.URL)
+		st.Titles = append(st.Titles, t.Title)
 	}
 	in.mu.Unlock()
 	b, _ := json.Marshal(st)
@@ -252,6 +280,9 @@ func allowedURL(u string) bool {
 // Stop closes Chrome gracefully (so cookies are flushed), then kills it.
 func (in *instance) Stop() {
 	in.saveTabs()
+	in.mu.Lock()
+	in.closing = true // tabs closing below must not overwrite the list just saved
+	in.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	_ = in.conn.Call(ctx, "", "Browser.close", nil, nil)
 	cancel()
@@ -317,7 +348,7 @@ func (in *instance) handle(ev cdpMessage) {
 		ti := p.TargetInfo
 		in.mu.Lock()
 		if _, ok := in.tabs[ti.TargetID]; !ok {
-			in.tabs[ti.TargetID] = &Tab{ID: ti.TargetID, URL: ti.URL, Title: ti.Title}
+			in.tabs[ti.TargetID] = &Tab{ID: ti.TargetID, URL: ti.URL, Title: ti.Title, lastActive: time.Now()}
 			in.order = append(in.order, ti.TargetID)
 		}
 		makeActive := in.active == "" || ti.OpenerID != ""
@@ -352,6 +383,10 @@ func (in *instance) handle(ev cdpMessage) {
 			return
 		}
 		in.mu.Lock()
+		if t := in.tabs[p.TargetID]; t != nil && t.Asleep {
+			in.mu.Unlock() // put to sleep on purpose: keep its place in the tab strip
+			return
+		}
 		_, existed := in.tabs[p.TargetID]
 		delete(in.tabs, p.TargetID)
 		for i, id := range in.order {
@@ -367,7 +402,7 @@ func (in *instance) handle(ev cdpMessage) {
 				next = in.order[len(in.order)-1]
 			}
 		}
-		empty := len(in.order) == 0
+		empty := len(in.order) == 0 && !in.closing
 		in.mu.Unlock()
 		if !existed {
 			return
@@ -384,7 +419,7 @@ func (in *instance) handle(ev cdpMessage) {
 
 	case "Page.screencastFrame":
 		var p struct {
-			Data      string `json:"data"`
+			Data      []byte `json:"data"` // encoding/json decodes the base64 straight into bytes
 			SessionID int    `json:"sessionId"`
 		}
 		if json.Unmarshal(ev.Params, &p) != nil {
@@ -397,9 +432,8 @@ func (in *instance) handle(ev cdpMessage) {
 		if !current {
 			return
 		}
-		img, err := base64.StdEncoding.DecodeString(p.Data)
-		if err == nil {
-			in.broadcastFrame(img)
+		if len(p.Data) > 0 {
+			in.broadcastFrame(p.Data)
 		}
 
 	case "Page.frameStartedLoading", "Page.frameStoppedLoading":
@@ -507,7 +541,7 @@ func (in *instance) attach(targetID string) {
 	// the identity and viewport above already applied.
 	in.mu.Lock()
 	t := in.tabs[targetID]
-	if t != nil {
+	if t != nil && !t.Asleep {
 		t.session = sess
 	}
 	isActive := in.active == targetID
@@ -588,9 +622,21 @@ func (in *instance) activate(targetID string) {
 		in.mu.Unlock()
 		return
 	}
+	if t.Asleep {
+		in.mu.Unlock()
+		in.wake(targetID)
+		return
+	}
+	now := time.Now()
+	if old := in.tabs[in.active]; old != nil {
+		old.lastActive = now
+	}
+	t.lastActive = now
 	in.active = targetID
 	sess, vp := t.session, in.vp
 	in.mu.Unlock()
+	// Shortly after a switch, put tabs beyond the profile's limit to sleep.
+	defer time.AfterFunc(6*time.Second, in.enforceSleep)
 	in.conn.Send("", "Target.activateTarget", map[string]string{"targetId": targetID})
 	if sess != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -600,6 +646,152 @@ func (in *instance) activate(targetID string) {
 		in.refreshHistory(targetID)
 	}
 	in.broadcastTabs()
+}
+
+// ---------- sleeping tabs ----------
+
+// sleep closes a background tab but keeps it in the strip; opening it reloads the page.
+func (in *instance) sleep(id string) {
+	in.mu.Lock()
+	t := in.tabs[id]
+	if t == nil || t.Asleep || t.Loading || id == in.active || id == in.waking || t.URL == "" || time.Since(t.lastActive) < 5*time.Second {
+		in.mu.Unlock()
+		return
+	}
+	t.Asleep, t.session, t.Loading, t.CanBack, t.CanFwd = true, "", false, false, false
+	in.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := in.conn.Call(ctx, "", "Target.closeTarget", map[string]string{"targetId": id}, nil); err != nil {
+		in.mu.Lock()
+		delete(in.tabs, id)
+		for i, x := range in.order {
+			if x == id {
+				in.order = append(in.order[:i], in.order[i+1:]...)
+				break
+			}
+		}
+		in.mu.Unlock()
+	}
+	in.log.Debug("tab asleep", "url", t.URL)
+	in.broadcastTabs()
+}
+
+// wake replaces a sleeping tab with a fresh one at the same place and loads its page.
+func (in *instance) wake(id string) {
+	in.mu.Lock()
+	ph := in.tabs[id]
+	if ph == nil || !ph.Asleep || in.waking != "" {
+		in.mu.Unlock()
+		return
+	}
+	in.waking = id
+	in.active = id // keep the strip showing it as selected while it loads
+	u, title := ph.URL, ph.Title
+	in.mu.Unlock()
+	in.broadcastTabs()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var res struct {
+		TargetID string `json:"targetId"`
+	}
+	err := in.conn.Call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank"}, &res)
+	in.mu.Lock()
+	in.waking = ""
+	if err != nil {
+		in.mu.Unlock()
+		return
+	}
+	// The created-event may or may not have been handled yet; either way, put the new
+	// tab where the sleeping one was.
+	nt := in.tabs[res.TargetID]
+	if nt == nil {
+		nt = &Tab{ID: res.TargetID}
+		in.tabs[res.TargetID] = nt
+	}
+	nt.URL, nt.Title, nt.lastActive = u, title, time.Now()
+	order := make([]string, 0, len(in.order))
+	for _, x := range in.order {
+		switch x {
+		case res.TargetID:
+			continue
+		case id:
+			order = append(order, res.TargetID)
+		default:
+			order = append(order, x)
+		}
+	}
+	in.order = order
+	delete(in.tabs, id)
+	in.mu.Unlock()
+	in.activate(res.TargetID)
+	if allowedURL(u) {
+		in.navigateTab(res.TargetID, u)
+	}
+}
+
+// enforceSleep puts background tabs to sleep: beyond the profile's live-tab limit,
+// after the idle period, or all of them when the host is short of memory.
+func (in *instance) enforceSleep() {
+	prof := in.m.prof
+	low := false
+	if mem := sysmem.Read(); mem.Available > 0 && mem.Available < 100<<20 {
+		low = true
+	}
+	in.mu.Lock()
+	var bg []*Tab
+	for _, id := range in.order {
+		if t := in.tabs[id]; t != nil && !t.Asleep && id != in.active && id != in.waking {
+			bg = append(bg, t)
+		}
+	}
+	in.mu.Unlock()
+	sort.Slice(bg, func(i, j int) bool { return bg[i].lastActive.Before(bg[j].lastActive) })
+	keep := max(prof.LiveTabs-1, 0)
+	idle := time.Duration(prof.SleepAfterMin) * time.Minute
+	for i, t := range bg {
+		over := len(bg)-i > keep
+		if low || over || time.Since(t.lastActive) > idle {
+			in.sleep(t.ID)
+		}
+	}
+}
+
+func (in *instance) sleepLoop() {
+	tick := time.NewTicker(30 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-in.stopped:
+			return
+		case <-tick.C:
+			in.enforceSleep()
+		}
+	}
+}
+
+// closeTab closes a tab; sleeping tabs have no page to close, so they are just dropped.
+func (in *instance) closeTab(id string) {
+	in.mu.Lock()
+	t := in.tabs[id]
+	if t != nil && t.Asleep {
+		delete(in.tabs, id)
+		for i, x := range in.order {
+			if x == id {
+				in.order = append(in.order[:i], in.order[i+1:]...)
+				break
+			}
+		}
+		in.mu.Unlock()
+		in.broadcastTabs()
+		go in.saveTabs()
+		return
+	}
+	in.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = in.conn.Call(ctx, "", "Target.closeTarget", map[string]string{"targetId": id}, nil)
 }
 
 func (in *instance) refreshHistory(targetID string) {

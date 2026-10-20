@@ -559,3 +559,61 @@ func TestNavidromeRelay(t *testing.T) {
 		t.Fatalf("still connected after disconnect: %v", out)
 	}
 }
+
+func TestStaticCachingAndGzip(t *testing.T) {
+	c, _ := setup(t)
+	req, _ := http.NewRequest("GET", c.base+"/js/core.js", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	res, err := http.DefaultTransport.RoundTrip(req) // no transparent decompression
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	etag := res.Header.Get("ETag")
+	if res.Header.Get("Content-Encoding") != "gzip" || etag == "" || !strings.HasPrefix(res.Header.Get("Content-Type"), "text/javascript") {
+		t.Fatalf("headers = %v", res.Header)
+	}
+	plain, _ := http.Get(c.base + "/js/core.js")
+	body, _ := io.ReadAll(plain.Body)
+	plain.Body.Close()
+	if len(gz) >= len(body)/2 {
+		t.Errorf("gzip %d bytes vs plain %d: not compressed", len(gz), len(body))
+	}
+	req.Header.Set("If-None-Match", etag)
+	res, _ = http.DefaultTransport.RoundTrip(req)
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotModified {
+		t.Fatalf("revalidation = %d, want 304", res.StatusCode)
+	}
+	if res, _ := http.Get(c.base + "/vendor/xterm/xterm.mjs"); res.Header.Get("Content-Type") != "text/javascript; charset=utf-8" {
+		t.Fatalf("mjs type = %q", res.Header.Get("Content-Type"))
+	}
+	if res, _ := http.Post(c.base+"/js/core.js", "text/plain", nil); res.StatusCode != http.StatusForbidden && res.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("POST to a static file = %d", res.StatusCode)
+	}
+}
+
+func TestCoverSearch(t *testing.T) {
+	c, cfg := setup(t)
+	c.do("POST", "/api/setup", map[string]string{"token": token(t, cfg), "username": "admin", "password": "correct-horse-1"}, nil)
+	for _, f := range []string{"A/photo1.jpg", "A/cover.jpg", "A/zz.png", "B/front.png", "B/a.jpg", "C/only.webp"} {
+		p := filepath.Join(cfg.FilesRoot, f)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte("x"), 0o644)
+	}
+	_, out := c.do("GET", "/api/files/search?kind=cover", nil, nil)
+	got := map[string]bool{}
+	for _, r := range out["results"].([]any) {
+		got[r.(map[string]any)["path"].(string)] = true
+	}
+	want := map[string]bool{"/A/cover.jpg": true, "/B/front.png": true, "/C/only.webp": true}
+	if len(got) != len(want) {
+		t.Fatalf("covers = %v, want %v", got, want)
+	}
+	for k := range want {
+		if !got[k] {
+			t.Fatalf("covers = %v, want %v", got, want)
+		}
+	}
+}

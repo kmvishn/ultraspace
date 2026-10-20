@@ -120,7 +120,7 @@ function mountMusic(win, args) {
     try {
       const [audioRes, imageRes] = await Promise.all([
         api('GET', '/api/files/search?kind=audio'),
-        api('GET', '/api/files/search?kind=image'),
+        api('GET', '/api/files/search?kind=cover'),
         nd.load(),
       ]);
       tracks = audioRes.results.map(parseTrack);

@@ -880,3 +880,5 @@ kbd { font-family: var(--font); font-size: 11px; padding: 2px 6px; border-radius
 .nd-connect-head { display: flex; gap: 16px; align-items: center; }
 .nd-connect-head h2 { margin: 0 0 4px; font-size: 18px; }
 .nd-logo { width: 54px; height: 54px; border-radius: 16px; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #fb7185, #e11d48); flex: none; }
+.bw-tab.asleep .bw-tab-title { opacity: .55; font-style: italic; }
+.bw-tab.asleep .i { color: var(--muted); }
