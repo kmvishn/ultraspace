@@ -1,6 +1,6 @@
 import {
   h, icon, api, report, toast, menu, ask, confirmDialog, settings, system, fmtBytes, fmtDate, fmtAgo,
-  kindOf, KIND_ICON, isEditable, joinPath, dirOf, baseOf, fileUrl, downloadFile, ApiError,
+  kindOf, KIND_ICON, isEditable, joinPath, dirOf, baseOf, fileUrl, thumbUrl, hasThumb, downloadFile, ApiError,
 } from '../core.js';
 import { registerApp, openApp, openFile } from '../wm.js';
 
@@ -158,7 +158,12 @@ function mountFiles(win, args) {
   function thumb(e, size) {
     const k = kindOf(e);
     if (k === 'image') {
-      return h('span', { class: 'thumb img' }, h('img', { src: fileUrl(e.path, true), loading: 'lazy', decoding: 'async', alt: '', draggable: 'false' }));
+      // Small server-made thumbnails instead of full photos; anything without one shows as is.
+      const src = hasThumb(e.name) ? thumbUrl(e.path, 256) : fileUrl(e.path, true);
+      return h('span', { class: 'thumb img' }, h('img', {
+        src, loading: 'lazy', decoding: 'async', alt: '', draggable: 'false',
+        onerror: (ev) => { if (!ev.target.dataset.full) { ev.target.dataset.full = '1'; ev.target.src = fileUrl(e.path, true); } },
+      }));
     }
     return h('span', { class: `thumb k-${k}` }, icon(KIND_ICON[k], size));
   }

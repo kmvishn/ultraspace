@@ -35,6 +35,8 @@ type Options struct {
 	Quality    int
 	// Profile is "auto" (from the host's RAM), "tiny", "small" or "normal".
 	Profile string
+	// AudioInput replaces ffmpeg's PulseAudio input (tests use a generated tone).
+	AudioInput []string
 }
 
 type Manager struct {
@@ -43,6 +45,8 @@ type Manager struct {
 	log       *slog.Logger
 	userAgent string
 	major     string
+	pulseBin  string // sound needs both; without them the browser is silent
+	ffmpegBin string
 
 	mu        sync.Mutex
 	instances map[int64]*instance
@@ -59,6 +63,8 @@ func New(opts Options, log *slog.Logger) *Manager {
 	}
 	m := &Manager{opts: opts, prof: prof, log: log, instances: map[int64]*instance{}, starting: map[int64]chan struct{}{}}
 	m.major = m.chromeMajor()
+	m.pulseBin, _ = exec.LookPath("pulseaudio")
+	m.ffmpegBin, _ = exec.LookPath("ffmpeg")
 	m.userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + m.major + ".0.0.0 Safari/537.36"
 	return m
 }
@@ -239,6 +245,7 @@ type inMsg struct {
 	DPR        float64 `json:"dpr"`
 	Accept     bool    `json:"accept"`
 	Session    string  `json:"session"`
+	On         bool    `json:"on"`
 }
 
 var mouseTypes = map[string]bool{"mousePressed": true, "mouseReleased": true, "mouseMoved": true}
@@ -325,6 +332,8 @@ func (in *instance) input(c *client, data []byte) {
 				c.sendJSON(map[string]any{"t": "copy", "text": text})
 			}
 		}()
+	case "audio":
+		in.audio.setListening(c, msg.On)
 	case "dialog":
 		in.conn.Send(msg.Session, "Page.handleJavaScriptDialog", map[string]any{"accept": msg.Accept, "promptText": msg.Text})
 	}
@@ -358,12 +367,13 @@ type client struct {
 	ws     *websocket.Conn
 	text   chan []byte
 	frame  chan []byte // holds at most the newest frame
+	audio  chan []byte
 	closed chan struct{}
 	once   sync.Once
 }
 
 func newClient(ws *websocket.Conn) *client {
-	return &client{ws: ws, text: make(chan []byte, 128), frame: make(chan []byte, 1), closed: make(chan struct{})}
+	return &client{ws: ws, text: make(chan []byte, 128), frame: make(chan []byte, 1), audio: make(chan []byte, 64), closed: make(chan struct{})}
 }
 
 func (c *client) sendText(b []byte) {
@@ -396,6 +406,23 @@ func (c *client) sendFrame(img []byte) {
 	}
 }
 
+// sendAudio queues sound. Init segments must arrive (wait briefly); a fragment for a
+// client that has fallen behind is dropped, which costs a tiny gap, not latency.
+func (c *client) sendAudio(b []byte, must bool) {
+	if must {
+		select {
+		case c.audio <- b:
+		case <-c.closed:
+		case <-time.After(2 * time.Second):
+		}
+		return
+	}
+	select {
+	case c.audio <- b:
+	default:
+	}
+}
+
 func (c *client) close() {
 	c.once.Do(func() {
 		close(c.closed)
@@ -418,6 +445,8 @@ func (c *client) writeLoop(ctx context.Context) {
 			err = c.write(ctx, websocket.MessageText, b)
 		case img := <-c.frame:
 			err = c.write(ctx, websocket.MessageBinary, img)
+		case b := <-c.audio:
+			err = c.write(ctx, websocket.MessageBinary, b)
 		case <-ping.C:
 			pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 			err = c.ws.Ping(pctx)

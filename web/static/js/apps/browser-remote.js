@@ -2,7 +2,48 @@
 // screen (JPEG frames over a WebSocket) and sends mouse, touch and keyboard input back.
 import { h, icon, api, report, toast, menu, on, ask, confirmDialog, fmtAgo, debounce } from '../core.js';
 import { openApp } from '../wm.js';
+import { share } from '../clipboard.js';
 import { ENGINES, webTarget, hostOf, siteIcon, data, addHistory } from './web-common.js';
+
+// Sound arrives as AAC in fragmented MP4 and plays through Media Source Extensions
+// (ManagedMediaSource on iPhone). Playback is kept close to live.
+function soundPlayer() {
+  const MS = window.ManagedMediaSource || window.MediaSource;
+  const el = new Audio();
+  el.disableRemotePlayback = true;
+  let ms = null, sb = null, queue = [], url = null;
+  const pump = () => {
+    if (!sb || sb.updating || !queue.length) return;
+    try { sb.appendBuffer(queue.shift()); } catch { queue = []; }
+  };
+  const keepLive = () => {
+    if (!sb || !el.buffered.length) return;
+    const end = el.buffered.end(el.buffered.length - 1);
+    if (end - el.currentTime > 1.2) el.currentTime = Math.max(0, end - 0.3);
+    if (!sb.updating && el.currentTime > 40) { try { sb.remove(0, el.currentTime - 15); } catch { /* busy */ } }
+  };
+  return {
+    supported: !!MS && MS.isTypeSupported?.('audio/mp4; codecs="mp4a.40.2"'),
+    init(bytes) {
+      if (url) URL.revokeObjectURL(url);
+      ms = new MS();
+      sb = null;
+      queue = [bytes];
+      url = URL.createObjectURL(ms);
+      el.src = url;
+      ms.addEventListener('sourceopen', () => {
+        sb = ms.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"');
+        sb.mode = 'sequence'; // ignore the stream's own clock, so joining mid-way starts at 0
+        sb.addEventListener('updateend', () => { keepLive(); pump(); });
+        pump();
+      }, { once: true });
+      el.play().catch(() => {});
+    },
+    fragment(bytes) { if (ms) { queue.push(bytes); if (queue.length > 50) queue.splice(1, queue.length - 25); pump(); } },
+    play() { return el.play(); },
+    stop() { el.pause(); el.removeAttribute('src'); el.load(); if (url) URL.revokeObjectURL(url); ms = sb = url = null; queue = []; },
+  };
+}
 
 // DOM key names whose events carry no text but matter to the page.
 const NAMED_TEXT = { Enter: '\r' };
@@ -34,6 +75,9 @@ export function mountRemote(win, args, { swap }) {
   const starBtn = h('button', { class: 'icon-btn', 'aria-label': 'Bookmark this page', title: 'Bookmark', onclick: () => toggleBookmark() }, icon('star', 16));
   const kbdBtn = h('button', { class: 'icon-btn bw-kbd', 'aria-label': 'Keyboard', title: 'Show keyboard', onclick: () => sink.focus() }, icon('terminal', 16));
   const moreBtn = h('button', { class: 'icon-btn', 'aria-label': 'More', onclick: (e) => moreMenu(e) }, icon('moreH', 16));
+  const sound = soundPlayer();
+  let soundOn = false;
+  const soundBtn = h('button', { class: 'icon-btn hidden', 'aria-label': 'Sound', title: 'Sound from the server browser', onclick: () => setSound(!soundOn, true) }, icon('volumeX', 16));
   const progress = h('div', { class: 'bw-progress' });
   const badge = h('span', { class: 'bw-badge', title: 'Running on your server: logins and tabs follow you to every device' }, icon('server', 12), 'Server');
 
@@ -50,7 +94,7 @@ export function mountRemote(win, args, { swap }) {
     h('div', { class: 'toolbar bw-toolbar' },
       h('div', { class: 'tb-group' }, backBtn, fwdBtn, reloadBtn),
       h('form', { class: 'bw-addr', onsubmit: (e) => { e.preventDefault(); submit(addr.value); } }, addrIcon, addr, badge, suggestions),
-      starBtn, kbdBtn, moreBtn, progress),
+      starBtn, soundBtn, kbdBtn, moreBtn, progress),
     stage));
 
   // ---------- connection ----------
@@ -60,9 +104,16 @@ export function mountRemote(win, args, { swap }) {
     showOverlay(retry ? 'Reconnecting to your server browser…' : 'Starting the browser on your server…', 'spin');
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}/api/remote/ws`);
-    ws.binaryType = 'blob';
+    ws.binaryType = 'arraybuffer';
     ws.onopen = () => { retry = 0; sendViewport(true); };
-    ws.onmessage = (e) => (typeof e.data === 'string' ? onMessage(JSON.parse(e.data)) : onFrame(e.data));
+    ws.onmessage = (e) => {
+      if (typeof e.data === 'string') { onMessage(JSON.parse(e.data)); return; }
+      const b = new Uint8Array(e.data);
+      // First byte says what follows: 1 screen frame, 2 sound init, 3 sound fragment.
+      if (b[0] === 1) onFrame(new Blob([b.subarray(1)], { type: 'image/jpeg' }));
+      else if (b[0] === 2 && soundOn) sound.init(b.slice(1));
+      else if (b[0] === 3 && soundOn) sound.fragment(b.slice(1));
+    };
     const self = ws;
     ws.onclose = () => {
       if (ws === self) ws = null;
@@ -73,6 +124,21 @@ export function mountRemote(win, args, { swap }) {
       showOverlay('Connection lost. Reconnecting…', 'spin');
       retryTimer = setTimeout(connect, wait);
     };
+  }
+
+  // Sound costs about 130 kbit/s while on, so it is off until switched on (and remembered).
+  function setSound(on, byClick) {
+    soundOn = on;
+    soundBtn.replaceChildren(icon(on ? 'volume' : 'volumeX', 16));
+    soundBtn.classList.toggle('on', on);
+    soundBtn.setAttribute('aria-label', on ? 'Turn sound off' : 'Turn sound on');
+    if (on) {
+      sound.play().catch(() => { if (!byClick) toast('Click the speaker button to hear sound from the server browser'); });
+    } else {
+      sound.stop();
+    }
+    send({ t: 'audio', on });
+    if (byClick && !!data.value.sound !== on) data.change((d) => { d.sound = on; });
   }
 
   function send(msg) {
@@ -98,13 +164,21 @@ export function mountRemote(win, args, { swap }) {
       case 'dialog':
         onDialog(m);
         break;
+      case 'audio':
+        soundBtn.classList.toggle('hidden', !m.available || !sound.supported);
+        if (m.available && sound.supported) {
+          if (soundOn) send({ t: 'audio', on: true }); // a new connection: ask for sound again
+          else if (data.value.sound) setSound(true, false);
+        }
+        break;
       case 'download':
         if (m.state === 'started') toast(`Downloading ${m.name}…`);
         else if (m.state === 'completed') toast(`Saved ${m.name} to Files → Downloads`);
         else if (m.state === 'canceled') toast(`Download of ${m.name || 'a file'} failed`, 'error');
         break;
       case 'copy':
-        navigator.clipboard?.writeText(m.text).then(() => toast('Copied'), () => toast('Copy blocked by this browser', 'error'));
+        share(m.text);
+        navigator.clipboard?.writeText(m.text).then(() => toast('Copied, also to your other devices'), () => toast('Sent to your shared clipboard'));
         break;
     }
   }
@@ -447,6 +521,7 @@ export function mountRemote(win, args, { swap }) {
       destroyed = true;
       clearTimeout(retryTimer);
       clearTimeout(pauseTimer);
+      sound.stop();
       document.removeEventListener('visibilitychange', onVisibility);
       ro.disconnect();
       off();

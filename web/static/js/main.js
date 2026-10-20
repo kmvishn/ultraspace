@@ -1,6 +1,7 @@
 import { h, icon, api, on, settings, ApiError } from './core.js';
 import { buildDesktop, applyAppearance } from './desktop.js';
 import { startSession, flushSession, stopSession } from './session.js';
+import { stopEvents } from './clipboard.js';
 import './apps/files.js';
 import './apps/system.js';
 import './apps/music.js';
@@ -10,6 +11,8 @@ import './apps/viewer.js';
 import './apps/browser.js';
 import './apps/terminal.js';
 import './apps/code.js';
+import './apps/notes.js';
+import './apps/photos.js';
 
 const app = document.getElementById('app');
 let user = null;
@@ -36,6 +39,7 @@ async function boot() {
 async function signOut() {
   await flushSession();
   stopSession();
+  stopEvents();
   await api('POST', '/api/logout').catch(() => {});
   user = null;
   window.ultraspaceUser = null;
@@ -43,7 +47,7 @@ async function signOut() {
 }
 
 on('signout', signOut);
-on('unauthorized', () => { if (user) { user = null; stopSession(); boot(); } });
+on('unauthorized', () => { if (user) { user = null; stopSession(); stopEvents(); boot(); } });
 
 function lockScreen(mode) {
   const bg = h('div', { class: 'lock' });

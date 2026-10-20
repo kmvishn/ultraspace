@@ -113,6 +113,10 @@ Two engines, switchable from the ⋯ menu:
     memory is short) and reload when you click them, like Chrome's tab discarding. After a restart only the
     active tab loads.
   - If the server is short of free memory, the browser says so instead of starting and pushing it into swap.
+  - **Sound** (speaker button): Chrome plays into a private PulseAudio sink on the server; while a window has
+    sound on, ffmpeg encodes it as AAC (fragmented MP4, ~130 kbit/s) and it plays in your browser through Media
+    Source Extensions, kept within about a second of the picture. Needs `pulseaudio` and `ffmpeg` on the server;
+    without them the browser is simply silent.
 - **Light mode**: pages load in a sandboxed frame on your own device. Uses no server memory, but many sites refuse
   to be framed; for those it shows a clear page with *Open in a new browser tab*.
 
@@ -137,6 +141,35 @@ saved on the server.
 - Runs lean by default: a smaller Node.js heap setting and memory-hungry extras (AI agent host, experiments,
   update checks, telemetry) turned off, which measured about 27% less memory. Existing settings are only ever
   added to, once.
+
+### Notes
+
+- Markdown notes kept as ordinary `.md` files in **Files → Notes**, so they can also be opened, backed up or edited
+  anywhere else (including VS Code).
+- Edit, split or preview; autosave; title = file name (renaming the title renames the file).
+- Toolbar and shortcuts for headings, **bold** (Ctrl+B), *italic* (Ctrl+I), lists, checkboxes, code and links;
+  lists continue on Enter.
+- Tick checkboxes straight in the preview. Full-text search across notes.
+- Changes made on another device appear when you come back, without ever overwriting unsaved typing.
+- The renderer escapes all HTML and only allows http(s) and mailto links.
+
+### Photos
+
+- Every image and video in Files as a timeline, grouped by the month it was **taken** (EXIF date, else the file
+  date), with All / Photos / Videos and per-folder views and three tile sizes.
+- Thumbnails are made on the server, upright (EXIF orientation), cached on disk and served with ETags. They are
+  generated one at a time and huge images are skipped, so a 512 MB server never decodes several photos at once.
+  Files uses the same thumbnails instead of loading full images.
+- Opens in the Viewer and steps through the current view; right-click for Show in Files, wallpaper, download,
+  delete. Upload with the button or by dropping files on the window (they go to **Files → Photos**).
+- Long timelines render in pages as you scroll.
+
+### Shared clipboard
+
+- The clipboard icon in the menu bar holds text shared between all your devices. Send what you type or paste;
+  every other open desktop gets it **instantly** (Server-Sent Events) with a one-click *Copy*.
+- Copying in the Terminal (Ctrl+Shift+C) or in the server Browser (Ctrl+C) also goes to the shared clipboard.
+- The last 25 items are kept on the server; remove items or clear it any time.
 
 ### Also
 
@@ -314,6 +347,9 @@ sudo mkdir -p /opt/ultraspace
 unzip chrome-headless-shell-linux64.zip
 sudo mv chrome-headless-shell-linux64 /opt/ultraspace/chrome
 
+# optional, for sound in the server browser
+sudo apt install --no-install-recommends pulseaudio ffmpeg
+
 # libraries and fonts it needs on a minimal Ubuntu server
 sudo apt install --no-install-recommends libatk1.0-0t64 libatk-bridge2.0-0t64 libxcomposite1 libxdamage1 \
   libxext6 libxfixes3 libxrandr2 libgbm1 libxkbcommon0 libasound2t64 libatspi2.0-0t64 \
@@ -456,9 +492,10 @@ internal/
   state/                 per-user JSON documents with conflict detection (workspace, bookmarks)
   sysmem/                host memory, memory profiles, OOM preference
   browser/               public-address dialer, light-mode site checker
-  remote/                Chrome over CDP pipe, screencast, input, tabs, egress proxy
+  remote/                Chrome over CDP pipe, screencast, input, tabs, sound, egress proxy
   agent/                 agent server (PTY sessions, code-server) and the authenticated proxy to it
   navidrome/             Subsonic relay with server-side credentials
+  clip/                  shared clipboard and the live event stream
   config/  httpx/        config loading, HTTP helpers
 web/static/
   index.html style.css   shell and all styles
@@ -485,7 +522,8 @@ such as `onArgs`, `onFocus`, `onResize`, `onClose`, `onDestroy` and `saveState` 
 Tests cover setup and login, rate limiting, CSRF, file-root escapes (`..` and symlinks), uploads and writes,
 search, settings, workspace sync and conflicts, device sign-out, database migration, the browser egress proxy,
 the public-address rules, terminal session replay, the Navidrome relay, static caching and compression,
-cover search, VS Code settings merging, and (with `ULTRASPACE_TEST_CHROME` set) sleeping and restoring tabs
+cover search, VS Code settings merging, photo dates/orientation/thumbnails, the shared clipboard and its live
+events, the sound stream's MP4 splitting (with ffmpeg installed), and (with `ULTRASPACE_TEST_CHROME` set) sleeping and restoring tabs
 in a real Chrome.
 
 ---
@@ -506,6 +544,8 @@ All endpoints except setup, login, logout and health need a session cookie. Non-
 | Terminal | `GET /api/agent/status`, `GET/POST /api/term/sessions`, `DELETE /api/term/sessions/{id}`, `GET /api/term/sessions/{id}/ws` (WebSocket) |
 | VS Code | `/code/…` (proxied code-server) |
 | Navidrome | `GET /api/navidrome`, `POST /api/navidrome/{connect,disconnect}`, `GET /api/navidrome/rest/{method}` |
+| Photos | `GET /api/files/photos`, `GET /api/files/thumb?path=&size=256\|512` |
+| Clipboard | `GET/POST/DELETE /api/clipboard`, `DELETE /api/clipboard/{id}`, `GET /api/events` (Server-Sent Events) |
 | Health | `GET /api/health` |
 
 ---
@@ -513,7 +553,7 @@ All endpoints except setup, login, logout and health need a session cookie. Non-
 ## Limitations
 
 - **Server browser**: streamed images, so scrolling and video are choppier than a local browser (roughly
-  10–15 fps) and there is **no sound**. File uploads from web pages are not supported yet. Some sites may still
+  10–15 fps), and sound runs slightly behind the picture. File uploads from web pages are not supported yet. Some sites may still
   detect an automated browser.
 - **Light mode** cannot follow navigation inside a page, and site logins stay on that device.
 - **Music** reads album and artist from folder and file names, not from tags, for files in Files.
