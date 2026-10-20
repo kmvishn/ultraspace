@@ -13,9 +13,10 @@ Restart=on-failure
 RestartSec=3
 # Soft memory target for the Go runtime; keeps the footprint small on 1 GB hosts.
 Environment=GOMEMLIMIT=64MiB
-# The remote browser (Chrome) runs inside this service; cap it so it can never starve the host.
-MemoryHigh=600M
-MemoryMax=750M
+# The remote browser (Chrome) runs inside this service; cap it so it can never starve the
+# host. Percentages of RAM, so the same file works from 512 MB machines upwards.
+MemoryHigh=60%
+MemoryMax=75%
 
 StateDirectory=ultraspace
 StateDirectoryMode=0750

@@ -40,7 +40,22 @@ function mountCode(win) {
   }
   load();
 
+  // A desktop left open in a background tab keeps VS Code's connection, so it would
+  // never stop on the server. After 10 hidden minutes, let go; reconnect on return.
+  let hiddenTimer = null;
+  let released = false;
+  const onVisibility = () => {
+    if (document.hidden) {
+      hiddenTimer = setTimeout(() => { released = true; frame?.remove(); frame = null; }, 10 * 60_000);
+    } else {
+      clearTimeout(hiddenTimer);
+      if (released) { released = false; load(); }
+    }
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+
   return {
+    onDestroy() { clearTimeout(hiddenTimer); document.removeEventListener('visibilitychange', onVisibility); },
     onFocus() { frame?.focus(); },
     saveState: () => ({}),
   };

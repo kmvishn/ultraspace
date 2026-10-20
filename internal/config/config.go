@@ -24,6 +24,9 @@ type Config struct {
 	TrustProxy bool     `toml:"trust_proxy"`
 	SessionTTL Duration `toml:"session_ttl"`
 	Browser    Browser  `toml:"browser"`
+	// MemoryProfile sizes the browser for the host: "auto" (from total RAM), "tiny"
+	// (512 MB hosts), "small" (about 1 GB) or "normal".
+	MemoryProfile string `toml:"memory_profile"`
 	// AgentSocket is where the Terminal and VS Code service (ultraspace agent) listens.
 	AgentSocket string `toml:"agent_socket"`
 }
@@ -33,7 +36,7 @@ type Browser struct {
 	// Chrome is the chrome-headless-shell binary. If it is missing, the Browser app
 	// falls back to showing pages directly in the visitor's own browser.
 	Chrome string `toml:"chrome"`
-	// Idle is how long Chrome keeps running with no window connected.
+	// Idle is how long Chrome keeps running with no window connected (0 = from the memory profile).
 	Idle Duration `toml:"idle"`
 	// NoSandbox turns off Chrome's own sandbox. Only for hosts where it cannot run.
 	NoSandbox bool `toml:"no_sandbox"`
@@ -54,13 +57,13 @@ func (d *Duration) UnmarshalText(b []byte) error {
 
 func Default() Config {
 	return Config{
-		Listen:     "127.0.0.1:4600",
-		DataDir:    "/var/lib/ultraspace",
-		SessionTTL: Duration{30 * 24 * time.Hour},
-		AgentSocket: "/run/ultraspace-agent.sock",
+		Listen:        "127.0.0.1:4600",
+		DataDir:       "/var/lib/ultraspace",
+		SessionTTL:    Duration{30 * 24 * time.Hour},
+		AgentSocket:   "/run/ultraspace-agent.sock",
+		MemoryProfile: "auto",
 		Browser: Browser{
 			Chrome:  "/opt/ultraspace/chrome/chrome-headless-shell",
-			Idle:    Duration{10 * time.Minute},
 			Quality: 70,
 		},
 	}

@@ -14,6 +14,7 @@ import (
 	"ultraspace/internal/agent"
 	"ultraspace/internal/config"
 	"ultraspace/internal/server"
+	"ultraspace/internal/sysmem"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -70,7 +71,8 @@ func runAgent(args []string) {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 	socket := fs.String("socket", "", "Unix socket to listen on when not started by systemd")
 	code := fs.String("code-server", "/opt/ultraspace/code-server/bin/code-server", "code-server binary for VS Code")
-	idle := fs.Duration("code-idle", 20*time.Minute, "stop VS Code after this long unused")
+	idle := fs.Duration("code-idle", 0, "stop VS Code after this long unused (0 = from the memory profile)")
+	profile := fs.String("memory-profile", "auto", "auto, tiny, small or normal")
 	debug := fs.Bool("debug", false, "verbose logging")
 	_ = fs.Parse(args)
 	level := slog.LevelInfo
@@ -80,7 +82,10 @@ func runAgent(args []string) {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := agent.Run(ctx, agent.Options{Socket: *socket, CodeServer: *code, CodeIdle: *idle}, log); err != nil {
+	if *idle <= 0 {
+		*idle = time.Duration(sysmem.Pick(*profile).CodeIdle) * time.Minute
+	}
+	if err := agent.Run(ctx, agent.Options{Socket: *socket, CodeServer: *code, CodeIdle: *idle, Profile: sysmem.Pick(*profile).Name}, log); err != nil {
 		log.Error("agent", "err", err)
 		os.Exit(1)
 	}

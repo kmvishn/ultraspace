@@ -8,6 +8,7 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,6 +19,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"ultraspace/internal/sysmem"
 
 	"ultraspace/internal/auth"
 	"ultraspace/internal/httpx"
@@ -30,10 +33,13 @@ type Options struct {
 	Idle       time.Duration
 	NoSandbox  bool
 	Quality    int
+	// Profile is "auto" (from the host's RAM), "tiny", "small" or "normal".
+	Profile string
 }
 
 type Manager struct {
 	opts      Options
+	prof      sysmem.Profile
 	log       *slog.Logger
 	userAgent string
 	major     string
@@ -44,13 +50,14 @@ type Manager struct {
 }
 
 func New(opts Options, log *slog.Logger) *Manager {
+	prof := sysmem.Pick(opts.Profile)
 	if opts.Idle <= 0 {
-		opts.Idle = 10 * time.Minute
+		opts.Idle = time.Duration(prof.BrowserIdle) * time.Minute
 	}
 	if opts.Quality <= 0 || opts.Quality > 100 {
 		opts.Quality = 70
 	}
-	m := &Manager{opts: opts, log: log, instances: map[int64]*instance{}, starting: map[int64]chan struct{}{}}
+	m := &Manager{opts: opts, prof: prof, log: log, instances: map[int64]*instance{}, starting: map[int64]chan struct{}{}}
 	m.major = m.chromeMajor()
 	m.userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + m.major + ".0.0.0 Safari/537.36"
 	return m
@@ -90,6 +97,11 @@ func (m *Manager) get(userID int64) (*instance, error) {
 			m.mu.Unlock()
 			<-wait
 			continue
+		}
+		// Chrome needs room to start; failing clearly beats pushing the host into swap.
+		if mem := sysmem.Read(); mem.Total > 0 && mem.Available < uint64(m.prof.MinFreeMB)<<20 {
+			m.mu.Unlock()
+			return nil, fmt.Errorf("only %d MB of memory is free on the server; close VS Code or other programs and try again", mem.Available>>20)
 		}
 		done := make(chan struct{})
 		m.starting[userID] = done
@@ -301,11 +313,7 @@ func (in *instance) input(c *client, data []byte) {
 		}
 		go in.newTab(u)
 	case "close":
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = in.conn.Call(ctx, "", "Target.closeTarget", map[string]string{"targetId": msg.ID}, nil)
-		}()
+		go in.closeTab(msg.ID)
 	case "activate":
 		go in.activate(msg.ID)
 	case "viewport":

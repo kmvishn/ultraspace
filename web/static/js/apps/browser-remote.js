@@ -160,16 +160,17 @@ export function mountRemote(win, args, { swap }) {
 
   function render() {
     tabStrip.replaceChildren(...tabs.map((t) => h('div', {
-      class: `bw-tab ${t === active ? 'active' : ''}`, role: 'tab', 'aria-selected': String(t === active), title: t.url,
+      class: `bw-tab ${t === active ? 'active' : ''} ${t.asleep ? 'asleep' : ''}`, role: 'tab', 'aria-selected': String(t === active),
+      title: t.asleep ? `${t.title || t.url}\nAsleep to save memory: opens again when you click it` : t.url,
       onclick: () => send({ t: 'activate', id: t.id }),
       onauxclick: (e) => { if (e.button === 1) { e.preventDefault(); send({ t: 'close', id: t.id }); } },
     },
-    t.loading ? h('span', { class: 'bw-spin' }) : isBlank(t.url) ? icon('globe', 14) : siteIcon(t.url, 'xs'),
+    t.loading ? h('span', { class: 'bw-spin' }) : t.asleep ? icon('moon', 13) : isBlank(t.url) ? icon('globe', 14) : siteIcon(t.url, 'xs'),
     h('span', { class: 'bw-tab-title' }, isBlank(t.url) ? 'New tab' : t.title || hostOf(t.url)),
     h('button', { class: 'bw-tab-close', 'aria-label': 'Close tab', onclick: (e) => { e.stopPropagation(); send({ t: 'close', id: t.id }); } }, icon('x', 12)))));
     tabStrip.querySelector('.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     const t = active;
-    const blank = !t || isBlank(t.url);
+    const blank = !t || (isBlank(t.url) && !t.asleep);
     if (document.activeElement !== addr) addr.value = blank ? '' : t.url;
     addrIcon.replaceChildren(icon(blank ? 'search' : t.url.startsWith('https:') ? 'lock' : 'info', 14));
     backBtn.disabled = !t?.can_back;

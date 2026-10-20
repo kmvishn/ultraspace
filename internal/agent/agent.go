@@ -22,6 +22,7 @@ type Options struct {
 	Socket     string
 	CodeServer string
 	CodeIdle   time.Duration
+	Profile    string
 }
 
 // Run serves the agent API until ctx is cancelled.
@@ -44,7 +45,8 @@ func Run(ctx context.Context, opts Options, log *slog.Logger) error {
 	if runtime == "" {
 		runtime = state
 	}
-	code := newCodeServer(opts.CodeServer, runtime, opts.CodeIdle, log)
+	code := newCodeServer(opts.CodeServer, runtime, state, opts.CodeIdle, log)
+	code.profile = opts.Profile
 	go code.idleLoop(ctx)
 
 	mux := http.NewServeMux()

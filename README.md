@@ -107,8 +107,12 @@ Two engines, switchable from the ⋯ menu:
   - Cookies, logins, tabs and history live on the server, so they follow you to every device.
   - Downloads land in **Files → Downloads**.
   - Pop-ups open as new tabs; page dialogs (alert, confirm, prompt, leave-page) appear as desktop dialogs.
-  - Chrome starts when a Browser window connects and stops after 10 idle minutes; a background tab stops
+  - Chrome starts when a Browser window connects and stops after a few idle minutes; a background tab stops
     streaming after a minute. Tabs are saved and reopened on the next start.
+  - **Sleeping tabs**: background tabs are closed after a while (or beyond a per-machine limit, or at once when
+    memory is short) and reload when you click them, like Chrome's tab discarding. After a restart only the
+    active tab loads.
+  - If the server is short of free memory, the browser says so instead of starting and pushing it into swap.
 - **Light mode**: pages load in a sandboxed frame on your own device. Uses no server memory, but many sites refuse
   to be framed; for those it shows a clear page with *Open in a new browser tab*.
 
@@ -128,7 +132,11 @@ saved on the server.
 - Full VS Code in the browser via [code-server](https://github.com/coder/code-server), running as the same Linux
   user as the Terminal.
 - Open folders, editors, unsaved changes (hot exit), settings and extensions are kept on the server.
-- Starts on first use (a few seconds), stops after 20 unused minutes; can also be opened in its own browser tab.
+- Starts on first use (a few seconds), stops after a period unused (5–20 minutes depending on the machine); can
+  also be opened in its own browser tab. A desktop left in a background tab lets go of it after 10 minutes.
+- Runs lean by default: a smaller Node.js heap setting and memory-hungry extras (AI agent host, experiments,
+  update checks, telemetry) turned off, which measured about 27% less memory. Existing settings are only ever
+  added to, once.
 
 ### Also
 
@@ -356,11 +364,12 @@ files_root    = ""                      # default: <data_dir>/files
 public_origin = ""                      # e.g. "https://ultraspace.example.com", accepted in Origin checks
 trust_proxy   = false                   # trust X-Forwarded-Proto / X-Real-IP from 127.0.0.1
 session_ttl   = "720h"                  # sign out after this much inactivity
+memory_profile = "auto"                 # auto | tiny | small | normal (see Resource usage)
 agent_socket  = "/run/ultraspace-agent.sock"
 
 [browser]
 chrome     = "/opt/ultraspace/chrome/chrome-headless-shell"   # missing = light mode only
-idle       = "10m"     # stop Chrome after this long with no window connected
+idle       = "0"       # stop Chrome after this long with no window connected (0 = from memory_profile)
 quality    = 70        # JPEG quality of the streamed screen
 no_sandbox = false     # only for hosts where Chrome's sandbox cannot run
 ```
@@ -368,7 +377,7 @@ no_sandbox = false     # only for hosts where Chrome's sandbox cannot run
 Command-line flags: `-config`, `-listen`, `-data`, `-debug`, `-version`.
 
 Agent flags (`ultraspace agent`): `-socket` (when not socket-activated), `-code-server` (binary path),
-`-code-idle` (default `20m`), `-debug`.
+`-code-idle` (default from the memory profile), `-memory-profile`, `-debug`.
 
 ---
 
@@ -396,17 +405,40 @@ text are restored; Browser tabs, Terminal sessions and VS Code were never closed
 
 ## Resource usage
 
-Measured on a 1 GB Oracle Cloud VM:
+ultraspace is meant to stay smooth down to a **512 MB** VPS. The core is tiny; the two heavy apps start only
+when used and size themselves to the machine with a **memory profile**, picked from total RAM unless you set
+`memory_profile`:
+
+| Profile | RAM | Live browser tabs | Chrome renderers | Background tab sleeps after | Chrome stops after | VS Code stops after |
+| --- | --- | --- | --- | --- | --- | --- |
+| `tiny` | ≤ 700 MB | 1 | 1 | 2 min | 3 min idle | 5 min idle |
+| `small` | ≤ 1.5 GB | 2 | 2 | 10 min | 5 min idle | 10 min idle |
+| `normal` | more | 6 | 4 | 30 min | 10 min idle | 20 min idle |
+
+Measured (PSS, which counts shared memory once):
 
 | Component | Memory | When |
 | --- | --- | --- |
-| ultraspace | ~13 MB | always |
+| ultraspace | ~15–25 MB | always |
 | ultraspace agent | a few MB plus your shells | after first Terminal/VS Code use |
-| Chrome (server browser) | ~250–400 MB | while a Browser window is connected, + 10 min |
-| code-server (VS Code) | ~110 MB at start, more with extensions and big projects | while in use, + 20 min |
+| Chrome, blank | ~150 MB | while a Browser window is connected |
+| Chrome, one live page | + the page: ~60 MB (Wikipedia) to ~300 MB (YouTube, news sites) | |
+| code-server (VS Code) | ~360 MB with a small project open (was ~500 MB before tuning) | while in use |
 
-`ultraspace.service` caps itself (and Chrome) with `MemoryHigh=600M` / `MemoryMax=750M`;
-`ultraspace-agent.service` uses `MemoryHigh=700M`. Tune them for bigger machines.
+Tuning built in:
+- Chrome: no software GPU rasterizer (~130 MB less), no back-forward cache, capped renderer processes, smaller
+  JavaScript young generation on `tiny`, sleeping tabs, and a free-memory check before starting.
+- code-server: `--max-semi-space-size=1` for its Node processes (not passed to your own programs), AI agent host,
+  experiments, update checks and telemetry off.
+- Chrome and code-server get a higher `oom_score_adj`, so if memory runs out the kernel kills them, not sshd or
+  nginx.
+- The services cap memory as a share of RAM (`MemoryHigh=60%`/`MemoryMax=75%` for ultraspace and Chrome,
+  `MemoryHigh=70%` for the agent), so one unit file fits every machine size.
+- The frontend is served precompressed with ETags (repeat visits transfer almost nothing), xterm.js loads only
+  when a Terminal opens, and the music scan asks the server for one cover per folder instead of every image.
+
+On a 512 MB machine, use Chrome or VS Code one at a time, and add swap (or zram) so short peaks do not hit the
+out-of-memory killer.
 
 ---
 
@@ -422,6 +454,7 @@ internal/
   monitor/               /proc sampling, history, processes
   services/              systemctl / journalctl readers
   state/                 per-user JSON documents with conflict detection (workspace, bookmarks)
+  sysmem/                host memory, memory profiles, OOM preference
   browser/               public-address dialer, light-mode site checker
   remote/                Chrome over CDP pipe, screencast, input, tabs, egress proxy
   agent/                 agent server (PTY sessions, code-server) and the authenticated proxy to it
@@ -451,7 +484,9 @@ such as `onArgs`, `onFocus`, `onResize`, `onClose`, `onDestroy` and `saveState` 
 
 Tests cover setup and login, rate limiting, CSRF, file-root escapes (`..` and symlinks), uploads and writes,
 search, settings, workspace sync and conflicts, device sign-out, database migration, the browser egress proxy,
-the public-address rules, terminal session replay, and the Navidrome relay.
+the public-address rules, terminal session replay, the Navidrome relay, static caching and compression,
+cover search, VS Code settings merging, and (with `ULTRASPACE_TEST_CHROME` set) sleeping and restoring tabs
+in a real Chrome.
 
 ---
 
