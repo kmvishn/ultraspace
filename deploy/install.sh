@@ -31,7 +31,9 @@ install -m 755 "$bin" /usr/local/bin/ultraspace
 id ultraspace >/dev/null 2>&1 || useradd --system --home /var/lib/ultraspace --shell /usr/sbin/nologin ultraspace
 mkdir -p /etc/ultraspace
 
+fresh=0
 if [ ! -f /etc/ultraspace/config.toml ]; then
+  fresh=1
   if [ "$mode" = lan ]; then
     sed -e 's#^listen = .*#listen = "0.0.0.0:4600"#' -e 's#^public_origin = .*#public_origin = ""#' \
       -e 's#^trust_proxy = .*#trust_proxy = false#' "$deploy/config.toml" > /etc/ultraspace/config.toml
@@ -54,12 +56,18 @@ else
   systemctl restart ultraspace
 fi
 
+sleep 2
 i=0
-until [ -f /var/lib/ultraspace/setup-token ] || [ -f /var/lib/ultraspace/ultraspace.db ] || [ $i -ge 20 ]; do sleep 0.5; i=$((i + 1)); done
+until [ -f /var/lib/ultraspace/setup-token ] || [ -f /var/lib/ultraspace/ultraspace.db ] || [ $i -ge 20 ]; do sleep 1; i=$((i + 1)); done
 systemctl is-active --quiet ultraspace || die "the service did not start; see: journalctl -u ultraspace -n 50"
 
 echo
-echo "ultraspace $(/usr/local/bin/ultraspace -version | cut -d' ' -f2) is running."
+version=$(/usr/local/bin/ultraspace -version | cut -d' ' -f2)
+if [ "$fresh" = 0 ] && [ ! -f /var/lib/ultraspace/setup-token ]; then
+  echo "Updated: ultraspace $version is running. Your config and data are unchanged."
+  exit 0
+fi
+echo "ultraspace $version is running."
 if [ -f /var/lib/ultraspace/setup-token ]; then
   echo "Setup token (paste it on the welcome screen to create your account):"
   echo "  $(cat /var/lib/ultraspace/setup-token)"
