@@ -47,6 +47,7 @@ type Manager struct {
 	major     string
 	pulseBin  string // sound needs both; without them the browser is silent
 	ffmpegBin string
+	stage     stage // files on their way into web pages
 
 	mu        sync.Mutex
 	instances map[int64]*instance
@@ -160,6 +161,8 @@ func (m *Manager) Register(mux *http.ServeMux, require func(http.Handler) http.H
 	mux.Handle("GET /api/remote/status", require(http.HandlerFunc(m.handleStatus)))
 	mux.Handle("GET /api/remote/ws", require(http.HandlerFunc(m.handleWS)))
 	mux.Handle("POST /api/remote/stop", require(http.HandlerFunc(m.handleStop)))
+	mux.Handle("POST /api/remote/upload", require(http.HandlerFunc(m.handleUpload)))
+	mux.Handle("POST /api/remote/import", require(http.HandlerFunc(m.handleImport)))
 }
 
 func (m *Manager) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -244,8 +247,10 @@ type inMsg struct {
 	H          int     `json:"h"`
 	DPR        float64 `json:"dpr"`
 	Accept     bool    `json:"accept"`
-	Session    string  `json:"session"`
-	On         bool    `json:"on"`
+	Session    string   `json:"session"`
+	On         bool     `json:"on"`
+	Node       int      `json:"node"`
+	IDs        []string `json:"ids"`
 }
 
 var mouseTypes = map[string]bool{"mousePressed": true, "mouseReleased": true, "mouseMoved": true}
@@ -334,6 +339,19 @@ func (in *instance) input(c *client, data []byte) {
 		}()
 	case "audio":
 		in.audio.setListening(c, msg.On)
+	case "chooser":
+		go in.fillChooser(msg.Session, msg.Node, in.m.resolve(in.userID, msg.IDs))
+	case "drop":
+		go in.dropFiles(msg.X, msg.Y, in.m.resolve(in.userID, msg.IDs))
+	case "pastefiles":
+		go func() {
+			taken, err := in.pasteFiles(in.m.resolve(in.userID, msg.IDs))
+			reply := map[string]any{"t": "pasted", "taken": taken}
+			if err != nil {
+				reply["error"] = err.Error()
+			}
+			c.sendJSON(reply)
+		}()
 	case "dialog":
 		in.conn.Send(msg.Session, "Page.handleJavaScriptDialog", map[string]any{"accept": msg.Accept, "promptText": msg.Text})
 	}
@@ -426,7 +444,9 @@ func (c *client) sendAudio(b []byte, must bool) {
 func (c *client) close() {
 	c.once.Do(func() {
 		close(c.closed)
-		c.ws.Close(websocket.StatusGoingAway, "browser stopped")
+		if c.ws != nil { // nil only for in-process test clients
+			c.ws.Close(websocket.StatusGoingAway, "browser stopped")
+		}
 	})
 }
 

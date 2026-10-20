@@ -1,6 +1,6 @@
 // Notes: Markdown notes kept as plain .md files in Files → Notes, so they are
 // ordinary files you can also open, back up or edit anywhere else.
-import { h, icon, api, report, toast, confirmDialog, menu, fmtAgo, debounce, fileUrl, ApiError } from '../core.js';
+import { h, icon, api, report, toast, confirmDialog, menu, fmtAgo, debounce, fileUrl, ApiError, uploadWithProgress } from '../core.js';
 import { registerApp } from '../wm.js';
 import { renderMarkdown, toggleTask } from '../markdown.js';
 
@@ -299,6 +299,24 @@ function mountNotes(win, args) {
   }
   const onVisible = () => { if (!document.hidden) checkElsewhere(); };
   document.addEventListener('visibilitychange', onVisible);
+
+  // Drop .md or .txt files on the window to import them as notes.
+  win.body.addEventListener('dragover', (e) => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); win.body.classList.add('dropping'); } });
+  win.body.addEventListener('dragleave', (e) => { if (!win.body.contains(e.relatedTarget)) win.body.classList.remove('dropping'); });
+  win.body.addEventListener('drop', async (e) => {
+    win.body.classList.remove('dropping');
+    const files = [...(e.dataTransfer?.files || [])].filter((f) => /\.(md|markdown|txt)$/i.test(f.name));
+    if (!files.length) { if (e.dataTransfer?.files.length) { e.preventDefault(); toast('Notes can import .md and .txt files', 'error'); } return; }
+    e.preventDefault();
+    await api('POST', '/api/files/mkdir', { path: DIR }).catch(() => {});
+    for (const f of files) {
+      // Import under a .md name; the upload keeps both if one already exists.
+      const file = /\.md$/i.test(f.name) ? f : new File([f], f.name.replace(/\.(txt|markdown)$/i, '.md'), { type: 'text/markdown' });
+      try { await uploadWithProgress(`/api/files/upload?path=${encodeURIComponent(DIR)}`, file); } catch (err) { report(err); }
+    }
+    await loadList();
+    loadContents();
+  });
 
   // ---------- start ----------
 

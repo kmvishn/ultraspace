@@ -147,6 +147,54 @@ export function downloadFile(p) {
   a.remove();
 }
 
+// ---------- uploads with a progress tray ----------
+
+let tray = null;
+
+// uploadWithProgress posts one file (multipart field "file") and shows its progress
+// in the shared tray; it resolves with the server's JSON answer.
+export function uploadWithProgress(url, file) {
+  if (!tray || !tray.isConnected) { tray = h('div', { class: 'uploads' }); document.body.append(tray); }
+  const bar = h('div');
+  const status = h('span', { class: 'up-status' }, 'Waiting…');
+  const item = h('div', { class: 'upload glass' },
+    h('div', { class: 'up-head' }, icon('upload', 14), h('span', { class: 'up-name' }, file.name)),
+    h('div', { class: 'meter thin' }, bar), status);
+  tray.append(item);
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.setRequestHeader('X-Ultraspace', '1');
+    const started = performance.now();
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable) return;
+      bar.style.width = `${((100 * e.loaded) / e.total).toFixed(1)}%`;
+      const rate = e.loaded / Math.max(0.001, (performance.now() - started) / 1000);
+      status.textContent = `${fmtBytes(e.loaded)} of ${fmtBytes(e.total)} · ${fmtBytes(rate)}/s`;
+    };
+    const finish = (err, value) => {
+      item.classList.add(err ? 'failed' : 'done');
+      setTimeout(() => item.remove(), err ? 6000 : 1800);
+      err ? reject(err) : resolve(value);
+    };
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) { bar.style.width = '100%'; status.textContent = 'Uploaded'; finish(null, data); return; }
+      const msg = data?.error || xhr.statusText || 'Upload failed';
+      status.textContent = msg;
+      finish(new Error(`${file.name}: ${msg}`));
+    };
+    xhr.onerror = () => { status.textContent = 'Network error'; finish(new Error(`${file.name}: network error`)); };
+    const form = new FormData();
+    form.append('file', file, file.name);
+    xhr.send(form);
+  });
+}
+
+// filesFrom returns the files in a paste or drop, if any.
+export const filesFrom = (dt) => (dt ? [...(dt.files || [])] : []);
+
 // ---------- toasts ----------
 
 export function toast(msg, kind = '') {

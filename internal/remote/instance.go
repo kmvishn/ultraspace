@@ -495,6 +495,15 @@ func (in *instance) handle(ev cdpMessage) {
 		}
 		in.broadcastJSON(map[string]any{"t": "dialog", "session": ev.SessionID, "type": p.Type, "message": p.Message, "default": p.DefaultPrompt, "url": p.URL})
 
+	case "Page.fileChooserOpened":
+		var p struct {
+			Mode          string `json:"mode"`
+			BackendNodeID int    `json:"backendNodeId"`
+		}
+		if json.Unmarshal(ev.Params, &p) == nil && p.BackendNodeID != 0 {
+			in.broadcastJSON(map[string]any{"t": "filechooser", "session": ev.SessionID, "node": p.BackendNodeID, "multiple": p.Mode == "selectMultiple"})
+		}
+
 	case "Page.javascriptDialogClosed":
 		in.mu.Lock()
 		delete(in.dialogs, ev.SessionID)
@@ -515,8 +524,9 @@ func (in *instance) handle(ev cdpMessage) {
 
 	case "Browser.downloadProgress":
 		var p struct {
-			GUID  string `json:"guid"`
-			State string `json:"state"`
+			GUID     string `json:"guid"`
+			State    string `json:"state"`
+			FilePath string `json:"filePath"`
 		}
 		if json.Unmarshal(ev.Params, &p) != nil || p.State == "inProgress" {
 			return
@@ -525,7 +535,11 @@ func (in *instance) handle(ev cdpMessage) {
 		name := in.downloads[p.GUID]
 		delete(in.downloads, p.GUID)
 		in.mu.Unlock()
-		in.broadcastJSON(map[string]any{"t": "download", "state": p.State, "name": name})
+		// Chrome may rename a download ("file (1).pdf"); report where it really landed.
+		if p.FilePath != "" {
+			name = filepath.Base(p.FilePath)
+		}
+		in.broadcastJSON(map[string]any{"t": "download", "state": p.State, "name": name, "path": "/Downloads/" + name})
 	}
 }
 
@@ -540,6 +554,8 @@ func (in *instance) attach(targetID string) {
 	}
 	sess := res.SessionID
 	_ = in.conn.Call(ctx, sess, "Page.enable", nil, nil)
+	// File dialogs (input type=file) come to the user's window instead of opening nowhere.
+	_ = in.conn.Call(ctx, sess, "Page.setInterceptFileChooserDialog", map[string]bool{"enabled": true}, nil)
 	in.applyIdentity(ctx, sess)
 	in.mu.Lock()
 	vp := in.vp

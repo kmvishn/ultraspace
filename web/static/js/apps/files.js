@@ -1,6 +1,6 @@
 import {
   h, icon, api, report, toast, menu, ask, confirmDialog, settings, system, fmtBytes, fmtDate, fmtAgo,
-  kindOf, KIND_ICON, isEditable, joinPath, dirOf, baseOf, fileUrl, thumbUrl, hasThumb, downloadFile, ApiError,
+  kindOf, KIND_ICON, isEditable, joinPath, dirOf, baseOf, fileUrl, thumbUrl, hasThumb, downloadFile, ApiError, uploadWithProgress,
 } from '../core.js';
 import { registerApp, openApp, openFile } from '../wm.js';
 
@@ -179,7 +179,13 @@ function mountFiles(win, args) {
       ondragstart: (ev) => {
         if (!selected.has(e.path)) { selected = new Set([e.path]); markSelection(); }
         ev.dataTransfer.setData(DRAG_TYPE, JSON.stringify([...selected]));
-        ev.dataTransfer.effectAllowed = 'move';
+        // Dragging one file out of the browser onto the computer's desktop downloads it (Chrome, Edge).
+        if (!e.dir && selected.size === 1) {
+          ev.dataTransfer.setData('DownloadURL', `application/octet-stream:${e.name.replace(/:/g, '_')}:${location.origin}${fileUrl(e.path)}`);
+          ev.dataTransfer.effectAllowed = 'copyMove';
+        } else {
+          ev.dataTransfer.effectAllowed = 'move';
+        }
       },
     };
   }
@@ -370,6 +376,15 @@ function mountFiles(win, args) {
     ev.preventDefault();
     upload([...ev.dataTransfer.files]);
   });
+  // Ctrl+V with files copied on this computer uploads them into the open folder.
+  root.addEventListener('paste', (ev) => {
+    if (ev.target.closest('input, textarea')) return;
+    const files = [...(ev.clipboardData?.files || [])];
+    if (!files.length) return;
+    ev.preventDefault();
+    if (query) { toast('Clear the search to choose a folder for the pasted files', 'error'); return; }
+    upload(files);
+  });
   content.addEventListener('keydown', (ev) => {
     if (ev.target !== content) return;
     const sel = entries.filter((e) => selected.has(e.path));
@@ -400,48 +415,8 @@ function mountFiles(win, args) {
   };
 }
 
-// ---------- uploads (shared tray) ----------
-
-let tray = null;
+// ---------- uploads ----------
 
 export function uploadFiles(dir, files) {
-  return files.reduce((p, f) => p.then(() => uploadOne(dir, f).catch(report)), Promise.resolve());
-}
-
-function uploadOne(dir, file) {
-  if (!tray || !tray.isConnected) { tray = h('div', { class: 'uploads' }); document.body.append(tray); }
-  const bar = h('div');
-  const status = h('span', { class: 'up-status' }, 'Waiting…');
-  const item = h('div', { class: 'upload glass' },
-    h('div', { class: 'up-head' }, icon('upload', 14), h('span', { class: 'up-name' }, file.name)),
-    h('div', { class: 'meter thin' }, bar), status);
-  tray.append(item);
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `/api/files/upload?path=${encodeURIComponent(dir)}`);
-    xhr.setRequestHeader('X-Ultraspace', '1');
-    const started = performance.now();
-    xhr.upload.onprogress = (e) => {
-      if (!e.lengthComputable) return;
-      bar.style.width = `${((100 * e.loaded) / e.total).toFixed(1)}%`;
-      const rate = e.loaded / Math.max(0.001, (performance.now() - started) / 1000);
-      status.textContent = `${fmtBytes(e.loaded)} of ${fmtBytes(e.total)} · ${fmtBytes(rate)}/s`;
-    };
-    const finish = (err) => {
-      item.classList.add(err ? 'failed' : 'done');
-      setTimeout(() => item.remove(), err ? 6000 : 1800);
-      err ? reject(err) : resolve();
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) { bar.style.width = '100%'; status.textContent = 'Uploaded'; finish(); return; }
-      let msg = xhr.statusText || 'Upload failed';
-      try { msg = JSON.parse(xhr.responseText).error || msg; } catch { /* not JSON */ }
-      status.textContent = msg;
-      finish(new Error(`${file.name}: ${msg}`));
-    };
-    xhr.onerror = () => { status.textContent = 'Network error'; finish(new Error(`${file.name}: network error`)); };
-    const form = new FormData();
-    form.append('file', file, file.name);
-    xhr.send(form);
-  });
+  return files.reduce((p, f) => p.then(() => uploadWithProgress(`/api/files/upload?path=${encodeURIComponent(dir)}`, f).catch(report)), Promise.resolve());
 }

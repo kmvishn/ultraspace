@@ -1,6 +1,7 @@
 // The server-browser engine: a real Chrome runs on the server; this window shows its
 // screen (JPEG frames over a WebSocket) and sends mouse, touch and keyboard input back.
-import { h, icon, api, report, toast, menu, on, ask, confirmDialog, fmtAgo, debounce } from '../core.js';
+import { h, icon, api, report, toast, notice, menu, on, ask, confirmDialog, dialog, fmtAgo, debounce, uploadWithProgress, filesFrom, downloadFile } from '../core.js';
+import { pickFiles } from '../pick.js';
 import { openApp } from '../wm.js';
 import { share } from '../clipboard.js';
 import { ENGINES, webTarget, hostOf, siteIcon, data, addHistory } from './web-common.js';
@@ -173,8 +174,20 @@ export function mountRemote(win, args, { swap }) {
         break;
       case 'download':
         if (m.state === 'started') toast(`Downloading ${m.name}…`);
-        else if (m.state === 'completed') toast(`Saved ${m.name} to Files → Downloads`);
-        else if (m.state === 'canceled') toast(`Download of ${m.name || 'a file'} failed`, 'error');
+        else if (m.state === 'completed') {
+          const close = notice(`Saved ${m.name} to Files → Downloads`, [
+            { label: 'Show in Files', run: () => openApp('files', { path: '/Downloads' }) },
+            { label: 'Save to this device', primary: true, run: () => downloadFile(m.path) },
+          ], 'download');
+          setTimeout(close, 15000);
+        } else if (m.state === 'canceled') toast(`Download of ${m.name || 'a file'} failed`, 'error');
+        break;
+      case 'filechooser':
+        onChooser(m);
+        break;
+      case 'pasted':
+        if (m.error) toast(m.error, 'error');
+        else if (!m.taken) toast('The page did not take the pasted file. Try dragging it onto the page.', 'error');
         break;
       case 'copy':
         share(m.text);
@@ -363,6 +376,68 @@ export function mountRemote(win, args, { swap }) {
     win.close();
   }
 
+  // ---------- files from this device (or Files) into the page ----------
+
+  async function stageLocal(files) {
+    const ids = [];
+    for (const f of files) {
+      try { ids.push(...(await uploadWithProgress('/api/remote/upload', f)).files.map((x) => x.id)); } catch (err) { report(err); }
+    }
+    return ids;
+  }
+
+  async function stageFromLibrary(paths) {
+    try { return (await api('POST', '/api/remote/import', { paths })).files.map((x) => x.id); } catch (err) { report(err); return []; }
+  }
+
+  // A page opened its file dialog: offer this device or the Files library.
+  function onChooser(m) {
+    const host = hostOf(active?.url || '') || 'The page';
+    const input = h('input', { type: 'file', class: 'hidden', multiple: m.multiple });
+    document.body.append(input);
+    let close = null;
+    input.addEventListener('change', async () => {
+      close?.();
+      const ids = await stageLocal([...input.files]);
+      input.remove();
+      if (ids.length) send({ t: 'chooser', session: m.session, node: m.node, ids });
+    });
+    close = dialog({
+      title: `${host} wants ${m.multiple ? 'files' : 'a file'}`,
+      body: h('p', { class: 'dialog-text' }, 'Choose from this device, or from Files on your server.'),
+      actions: [
+        h('button', { class: 'btn', onclick: () => { close(); input.remove(); } }, 'Cancel'),
+        h('button', {
+          class: 'btn',
+          onclick: async () => {
+            close();
+            input.remove();
+            const paths = await pickFiles({ multiple: m.multiple });
+            if (paths?.length) send({ t: 'chooser', session: m.session, node: m.node, ids: await stageFromLibrary(paths) });
+          },
+        }, icon('folder', 15), 'From Files'),
+        h('button', { class: 'btn primary', onclick: () => input.click() }, icon('upload', 15), 'From this device'),
+      ],
+    });
+  }
+
+  stage.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer?.types.includes('Files') || state !== 'ready') return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    stage.classList.add('dropping');
+  });
+  stage.addEventListener('dragleave', (e) => { if (!stage.contains(e.relatedTarget)) stage.classList.remove('dropping'); });
+  stage.addEventListener('drop', async (e) => {
+    stage.classList.remove('dropping');
+    const files = filesFrom(e.dataTransfer);
+    if (!files.length) return;
+    e.preventDefault();
+    const at = toPage(e);
+    const ids = await stageLocal(files);
+    if (ids.length) send({ t: 'drop', ...at, ids });
+  });
+
   async function onDialog(m) {
     const where = hostOf(m.url || active?.url || '');
     if (m.type === 'prompt') {
@@ -467,6 +542,8 @@ export function mountRemote(win, args, { swap }) {
   });
   sink.addEventListener('paste', (e) => {
     e.preventDefault();
+    const files = filesFrom(e.clipboardData);
+    if (files.length) { stageLocal(files).then((ids) => ids.length && send({ t: 'pastefiles', ids })); return; }
     const text = e.clipboardData?.getData('text/plain');
     if (text) send({ t: 'text', text });
   });
