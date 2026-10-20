@@ -165,6 +165,13 @@ function mountFiles(win, args) {
         onerror: (ev) => { if (!ev.target.dataset.full) { ev.target.dataset.full = '1'; ev.target.src = fileUrl(e.path, true); } },
       }));
     }
+    if (k === 'video' && size > 30) {
+      // A frame from the video, made by the server; plain icon if it cannot.
+      return h('span', { class: 'thumb img vid' }, h('img', {
+        src: thumbUrl(e.path, 256), loading: 'lazy', decoding: 'async', alt: '', draggable: 'false',
+        onerror: (ev) => ev.target.parentElement.replaceWith(h('span', { class: `thumb k-${k}` }, icon(KIND_ICON[k], size))),
+      }), h('span', { class: 'thumb-play' }, icon('play', 12)));
+    }
     return h('span', { class: `thumb k-${k}` }, icon(KIND_ICON[k], size));
   }
 

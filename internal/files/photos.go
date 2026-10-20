@@ -41,7 +41,7 @@ const maxThumbPixels = 50_000_000
 var thumbSizes = map[int]bool{256: true, 512: true}
 
 var photoExts = []string{".jpg", ".jpeg", ".png", ".gif", ".webp"}
-var videoExts = []string{".mp4", ".webm", ".mov", ".m4v"}
+var videoExts = videoExtsAll // photo timelines list every video the player can open
 
 // photoInfo is cached per file and revalidated by modification time and size.
 type photoInfo struct {
@@ -179,7 +179,9 @@ func (f *Files) handleThumb(w http.ResponseWriter, r *http.Request) {
 		f.fail(w, err)
 		return
 	}
-	if info.IsDir() || !slices.Contains(photoExts, strings.ToLower(path.Ext(p))) {
+	ext := strings.ToLower(path.Ext(p))
+	isVideo := slices.Contains(videoExtsAll, ext)
+	if info.IsDir() || !slices.Contains(photoExts, ext) && !(isVideo && ffmpegBin != "") {
 		httpx.Error(w, http.StatusUnsupportedMediaType, "no thumbnail for this file")
 		return
 	}
@@ -198,7 +200,12 @@ func (f *Files) handleThumb(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(b)
 		return
 	}
-	b, err := f.makeThumb(r, p, info, size)
+	var b []byte
+	if isVideo {
+		b, err = f.makeVideoThumb(r, p, size)
+	} else {
+		b, err = f.makeThumb(r, p, info, size)
+	}
 	if err != nil {
 		f.log.Debug("thumbnail", "path", p, "err", err)
 		httpx.Error(w, http.StatusUnsupportedMediaType, "cannot make a thumbnail for this image")
@@ -212,6 +219,16 @@ func (f *Files) handleThumb(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
 	_, _ = w.Write(b)
+}
+
+func (f *Files) makeVideoThumb(r *http.Request, p string, size int) ([]byte, error) {
+	select {
+	case thumbSlot <- struct{}{}:
+		defer func() { <-thumbSlot }()
+	case <-r.Context().Done():
+		return nil, r.Context().Err()
+	}
+	return f.videoThumb(r.Context(), p, size)
 }
 
 func (f *Files) makeThumb(r *http.Request, p string, info fs.FileInfo, size int) ([]byte, error) {

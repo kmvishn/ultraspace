@@ -60,6 +60,7 @@ func (f *Files) Register(mux *http.ServeMux, auth func(http.Handler) http.Handle
 	handle("POST /api/files/write", f.handleWrite)
 	handle("GET /api/files/search", f.handleSearch)
 	f.registerPhotos(handle)
+	f.registerMedia(handle)
 }
 
 const maxTextWrite = 5 << 20

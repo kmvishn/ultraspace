@@ -19,6 +19,7 @@ import (
 var limits = map[string]int64{
 	"workspace": 512 << 10,
 	"browser":   256 << 10,
+	"media":     128 << 10, // video resume positions
 }
 
 type Handler struct {

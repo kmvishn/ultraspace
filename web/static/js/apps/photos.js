@@ -122,7 +122,10 @@ function mountPhotos(win, args) {
   function tile(p, i) {
     const big = SIZES[size] > 180;
     const body = p.video
-      ? h('span', { class: 'photo-video' }, icon('film', 26), h('span', { class: 'photo-video-name' }, p.name))
+      ? h('img', {
+        src: thumbUrl(p.path, big ? 512 : 256), loading: 'lazy', decoding: 'async', alt: p.name, draggable: 'false',
+        onerror: (e) => e.target.replaceWith(h('span', { class: 'photo-video' }, icon('film', 26), h('span', { class: 'photo-video-name' }, p.name))),
+      })
       : h('img', {
         src: thumbUrl(p.path, big ? 512 : 256), loading: 'lazy', decoding: 'async', alt: p.name, draggable: 'false',
         onerror: (e) => e.target.replaceWith(h('span', { class: 'photo-video' }, icon('image', 24))),
@@ -135,6 +138,10 @@ function mountPhotos(win, args) {
   }
 
   function openViewer(i) {
+    if (shown[i].video) {
+      openApp('video', { path: shown[i].path, siblings: shown.filter((p) => p.video).slice(0, 500).map((p) => p.path) });
+      return;
+    }
     // The viewer steps through the current view; keep the list it gets reasonable.
     const from = Math.max(0, i - 1000);
     const siblings = shown.slice(from, from + 2000).map((p) => p.path);

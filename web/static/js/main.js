@@ -13,6 +13,7 @@ import './apps/terminal.js';
 import './apps/code.js';
 import './apps/notes.js';
 import './apps/photos.js';
+import './apps/video.js';
 
 const app = document.getElementById('app');
 let user = null;
