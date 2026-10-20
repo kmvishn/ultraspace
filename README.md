@@ -1,5 +1,7 @@
 # ultraspace
 
+> **Bored of plain SSH to your server? Try ultraspace — your friendly neighbourhood Go application.**
+
 **Your own server, as a desktop in the browser.** ultraspace is a single Go binary that turns a
 small Linux VPS into a personal web desktop: files, system monitor, music player, a real web
 browser, a terminal and VS Code — all in windows you can drag, snap and resize, from any device.
@@ -155,6 +157,30 @@ saved on the server.
 - Runs lean by default: a smaller Node.js heap setting and memory-hungry extras (AI agent host, experiments,
   update checks, telemetry) turned off, which measured about 27% less memory. Existing settings are only ever
   added to, once.
+
+### Videos
+
+A VLC-style player for videos in Files (or on this device), for almost any format ffmpeg reads: MP4, MKV, AVI,
+MOV, WebM, WMV, FLV, MPEG, M2TS, 3GP, VOB and more. The server picks the cheapest way your browser can play each
+file:
+
+| Mode | When | Cost |
+| --- | --- | --- |
+| Direct | MP4/WebM with codecs your browser has (H.264, VP9, AV1, HEVC where supported) | none, native seeking |
+| Repackaged | the codecs are fine but the container is not (MKV, TS, …) | almost none |
+| Repackaged + audio | the audio is AC3, DTS, … | small |
+| Converting | the video codec is not playable (Xvid/MPEG-4, WMV, MPEG-2, HEVC elsewhere) | heavy; 720p by default |
+
+- Seek bar with buffered range and hover time, play/pause, previous/next in the folder, volume, speed (0.5–2×),
+  audio track choice, picture-in-picture, full screen, and a quality menu to force conversion at 1080p/720p/480p.
+- Subtitles: tracks inside the file (SRT/ASS/WebVTT), subtitle files next to the video (`Movie.srt`,
+  `Movie.en.srt`, …) or a file from this device.
+- Positions are saved on the server: **Continue watching** shows where you left off, on every device.
+- Keyboard: Space/K play, ←/→ (or J/L) 10 s, Shift+←/→ 60 s, ↑/↓ volume, M mute, F full screen, C subtitles,
+  N/P next/previous, [ ] speed.
+- Files and Photos show frames from videos as thumbnails.
+- One conversion runs at a time per user; seeking or opening another file stops the previous one. Files are read
+  through a descriptor opened inside the library, so symlinks cannot lead ffmpeg elsewhere.
 
 ### Notes
 
@@ -361,7 +387,7 @@ sudo mkdir -p /opt/ultraspace
 unzip chrome-headless-shell-linux64.zip
 sudo mv chrome-headless-shell-linux64 /opt/ultraspace/chrome
 
-# optional, for sound in the server browser
+# optional: sound in the server browser (pulseaudio + ffmpeg), and the video player (ffmpeg)
 sudo apt install --no-install-recommends pulseaudio ffmpeg
 
 # libraries and fonts it needs on a minimal Ubuntu server
@@ -539,7 +565,8 @@ such as `onArgs`, `onFocus`, `onResize`, `onClose`, `onDestroy` and `saveState` 
 Tests cover setup and login, rate limiting, CSRF, file-root escapes (`..` and symlinks), uploads and writes,
 search, settings, workspace sync and conflicts, device sign-out, database migration, the browser egress proxy,
 the public-address rules, terminal session replay, the Navidrome relay, static caching and compression,
-cover search, VS Code settings merging, photo dates/orientation/thumbnails, the shared clipboard and its live
+cover search, VS Code settings merging, photo dates/orientation/thumbnails, the video player's direct/repackage/convert decisions, streams, subtitles and
+video thumbnails (with ffmpeg installed), the shared clipboard and its live
 events, the sound stream's MP4 splitting (with ffmpeg installed), and (with `ULTRASPACE_TEST_CHROME` set) sleeping and restoring tabs
 in a real Chrome, plus file choosers, drag-and-drop and pasted files reaching a page.
 
@@ -561,7 +588,8 @@ All endpoints except setup, login, logout and health need a session cookie. Non-
 | Terminal | `GET /api/agent/status`, `GET/POST /api/term/sessions`, `DELETE /api/term/sessions/{id}`, `GET /api/term/sessions/{id}/ws` (WebSocket) |
 | VS Code | `/code/…` (proxied code-server) |
 | Navidrome | `GET /api/navidrome`, `POST /api/navidrome/{connect,disconnect}`, `GET /api/navidrome/rest/{method}` |
-| Photos | `GET /api/files/photos`, `GET /api/files/thumb?path=&size=256\|512` |
+| Photos | `GET /api/files/photos`, `GET /api/files/thumb?path=&size=256\|512` (images and videos) |
+| Videos | `GET /api/files/probe`, `GET /api/files/stream?path=&t=&audio=&mode=&h=`, `GET /api/files/subtitle` |
 | Clipboard | `GET/POST/DELETE /api/clipboard`, `DELETE /api/clipboard/{id}`, `GET /api/events` (Server-Sent Events) |
 | Health | `GET /api/health` |
 

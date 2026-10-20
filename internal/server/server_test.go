@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -756,4 +757,92 @@ func TestPhotosAndThumbnails(t *testing.T) {
 	if code, _ := c.do("GET", "/api/files/thumb?path=/notes.txt", nil, nil); code != 404 && code != 415 {
 		t.Fatalf("thumb of a non-image = %d", code)
 	}
+}
+
+func TestVideoPlayerModes(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	c, cfg := setup(t)
+	c.do("POST", "/api/setup", map[string]string{"token": token(t, cfg), "username": "admin", "password": "correct-horse-1"}, nil)
+	dir := filepath.Join(cfg.FilesRoot, "Videos")
+	os.MkdirAll(dir, 0o755)
+	gen := func(name string, args ...string) {
+		t.Helper()
+		base := []string{"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=24:duration=12",
+			"-f", "lavfi", "-i", "sine=frequency=440:duration=12"}
+		cmd := exec.Command(ffmpeg, append(append(base, args...), filepath.Join(dir, name))...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("make %s: %v %s", name, err, out)
+		}
+	}
+	gen("direct.mp4", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac")
+	os.WriteFile(filepath.Join(dir, "direct.en.srt"), []byte("1\n00:00:01,000 --> 00:00:03,000\nHello there\n"), 0o644)
+	srt := filepath.Join(t.TempDir(), "s.srt")
+	os.WriteFile(srt, []byte("1\n00:00:02,000 --> 00:00:04,000\nInside the file\n"), 0o644)
+	cmd := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=24:duration=12",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=12", "-f", "lavfi", "-i", "sine=frequency=880:duration=12", "-i", srt,
+		"-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:s", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "ac3", "-c:s", "srt",
+		"-metadata:s:a:1", "language=fra", filepath.Join(dir, "remux.mkv"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("make mkv: %v %s", err, out)
+	}
+	gen("old.avi", "-c:v", "mpeg4", "-c:a", "libmp3lame")
+
+	probe := func(name string) map[string]any {
+		t.Helper()
+		code, out := c.do("GET", "/api/files/probe?path=/Videos/"+name, nil, nil)
+		if code != 200 {
+			t.Fatalf("probe %s = %d %v", name, code, out)
+		}
+		return out
+	}
+	if p := probe("direct.mp4"); p["plan"].(map[string]any)["mode"] != "direct" || len(p["subtitles"].([]any)) != 1 {
+		t.Fatalf("direct.mp4 = %v", p)
+	}
+	p := probe("remux.mkv")
+	if p["plan"].(map[string]any)["mode"] != "remux" || len(p["audio"].([]any)) != 2 || len(p["subtitles"].([]any)) != 1 {
+		t.Fatalf("remux.mkv = %v", p)
+	}
+	if d := p["duration"].(float64); d < 11 || d > 13 {
+		t.Fatalf("duration = %v", d)
+	}
+	if p := probe("old.avi"); p["plan"].(map[string]any)["mode"] != "transcode" {
+		t.Fatalf("old.avi = %v", p)
+	}
+
+	stream := func(q string) []byte {
+		t.Helper()
+		res, err := c.http.Get(c.base + "/api/files/stream?" + q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+		if res.StatusCode != 200 || len(b) < 16 || string(b[4:8]) != "ftyp" {
+			t.Fatalf("stream %s = %d, starts % x", q, res.StatusCode, b[:min(16, len(b))])
+		}
+		return b
+	}
+	stream("path=/Videos/remux.mkv&audio=1&t=4")
+	stream("path=/Videos/old.avi&h=360")
+
+	res, _ := c.http.Get(c.base + "/api/files/subtitle?path=/Videos/remux.mkv&stream=0")
+	vtt, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if !strings.HasPrefix(string(vtt), "WEBVTT") || !strings.Contains(string(vtt), "Inside the file") {
+		t.Fatalf("embedded subtitle = %q", vtt)
+	}
+	res, _ = c.http.Get(c.base + "/api/files/subtitle?path=/Videos/direct.en.srt")
+	vtt, _ = io.ReadAll(res.Body)
+	res.Body.Close()
+	if !strings.Contains(string(vtt), "Hello there") {
+		t.Fatalf("subtitle file = %q", vtt)
+	}
+	res, _ = c.http.Get(c.base + "/api/files/thumb?path=/Videos/old.avi&size=256")
+	if _, err := jpeg.Decode(res.Body); err != nil {
+		t.Fatalf("video thumb: %v", err)
+	}
+	res.Body.Close()
 }

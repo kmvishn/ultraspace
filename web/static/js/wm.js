@@ -54,7 +54,8 @@ export function openApp(id, args = {}, opts = {}) {
 // Opens a file in the app that suits it, or downloads it.
 export function openFile(entry, context = {}) {
   const kind = kindOf(entry);
-  if (kind === 'image' || kind === 'video') return openApp('viewer', { path: entry.path, siblings: context.siblings });
+  if (kind === 'video') return openApp('video', { path: entry.path, siblings: (context.siblings || []).filter((p) => kindOf({ name: p }) === 'video') });
+  if (kind === 'image') return openApp('viewer', { path: entry.path, siblings: (context.siblings || []).filter((p) => kindOf({ name: p }) === 'image') });
   if (kind === 'audio') return openApp('music', { play: entry.path });
   if (isEditable(entry) && (entry.size ?? 0) <= 2 * 1024 * 1024) return openApp('editor', { path: entry.path });
   downloadFile(entry.path);

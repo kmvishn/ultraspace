@@ -110,7 +110,7 @@ export function debounce(fn, ms) {
 
 const KINDS = {
   image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico'],
-  video: ['mp4', 'webm', 'mov', 'm4v', 'ogv'],
+  video: ['mp4', 'webm', 'mov', 'm4v', 'ogv', 'mkv', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', 'm2ts', 'mts', '3gp', 'vob', 'divx', 'asf'],
   audio: ['mp3', 'flac', 'ogg', 'oga', 'opus', 'wav', 'm4a', 'aac'],
   archive: ['zip', 'tar', 'gz', 'tgz', 'xz', 'zst', '7z', 'rar', 'bz2'],
   code: ['js', 'mjs', 'ts', 'tsx', 'jsx', 'go', 'py', 'rs', 'c', 'h', 'cpp', 'java', 'rb', 'php', 'sh', 'bash', 'zsh',
