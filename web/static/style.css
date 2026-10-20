@@ -1130,3 +1130,127 @@ kbd { font-family: var(--font); font-size: 11px; padding: 2px 6px; border-radius
 .pattern-msg { text-align: center; min-height: 2.6em; }
 .pattern-row { cursor: default; flex-wrap: wrap; }
 .pattern-row .set-desc { overflow-wrap: anywhere; }
+
+/* ---------- Videos: waiting for a torrent or stream ---------- */
+
+.vp-spinner { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+.vp-spin-note { font-size: 13px; color: rgba(255, 255, 255, .8); text-shadow: 0 1px 3px #000; }
+.vp-spin-note:empty { display: none; }
+
+/* ---------- Torrents ---------- */
+
+.app-torrents.drop .main { outline: 2px dashed var(--accent); outline-offset: -6px; }
+.tr-magnet { flex: 1; min-width: 80px; }
+.tr-side-stats { padding: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.tr-rate { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-weight: 550; }
+.tr-list { padding: 6px; }
+.tr-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--r-md); cursor: default; outline: none; }
+.tr-row:hover { background: var(--hover); }
+.tr-row.selected, .tr-row:focus-visible { background: var(--accent-soft); }
+.tr-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.tr-name { display: flex; align-items: center; gap: 8px; font-weight: 600; min-width: 0; }
+.tr-name > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-variant-numeric: tabular-nums; }
+.tr-meta span { display: inline-flex; align-items: center; gap: 3px; white-space: pre; }
+.tr-state { font-weight: 600; }
+.tr-state.downloading, .tr-state.metadata { color: var(--accent); }
+.tr-state.seeding, .tr-state.done { color: var(--ok); }
+.tr-state.error, .tr-error { color: var(--danger); }
+.tr-actions { display: flex; gap: 2px; flex: none; }
+.meter.ok > div { background: var(--ok); }
+.tr-detail { flex: none; max-height: 45%; display: flex; flex-direction: column; border-top: 1px solid var(--border); background: var(--win-bg-2); min-height: 0; }
+.tr-detail-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; min-width: 0; }
+.tr-detail-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-files { padding: 0 4px 8px; }
+.tr-files .table th { background: var(--win-bg-2); }
+.tr-file-name { overflow-wrap: anywhere; }
+@media (max-width: 760px) { .tr-hide-narrow { display: none; } .tr-row { padding: 10px 6px; } }
+
+/* ---------- Stremio ---------- */
+
+.app-stremio .main { position: relative; }
+.st-content { position: relative; }
+.st-home, .st-page { padding: 14px 18px 28px; display: flex; flex-direction: column; gap: 18px; }
+.st-page-title, .st-filters h2 { margin: 0; font-size: 20px; }
+.st-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.st-filters select, .st-shelf-head select { width: auto; max-width: 260px; height: 30px; }
+.st-shelf { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.st-shelf-head { display: flex; align-items: center; gap: 10px; }
+.st-shelf-head h3 { margin: 0; font-size: 15px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-row { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; scrollbar-width: thin; }
+.st-row-loading { height: 60px; display: grid; place-items: center; width: 100%; }
+.st-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 16px 12px; }
+.st-card { flex: none; width: 132px; display: flex; flex-direction: column; gap: 4px; text-align: left; scroll-snap-align: start; border-radius: var(--r-md); }
+.st-grid .st-card { width: auto; }
+.st-card.wide { width: 232px; }
+.st-poster { position: relative; display: block; aspect-ratio: 2 / 3; border-radius: var(--r-md); overflow: hidden; background: linear-gradient(160deg, var(--active), var(--field)); box-shadow: 0 4px 14px rgba(0, 0, 0, .25); transition: transform .15s var(--ease), box-shadow .15s; }
+.st-card.wide .st-poster { aspect-ratio: 16 / 9; }
+.st-card.square .st-poster { aspect-ratio: 1; }
+.st-poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
+.st-poster-name { position: absolute; inset: 0; display: grid; place-items: center; padding: 10px; text-align: center; font-weight: 650; font-size: 13px; color: var(--text-2); }
+.st-card:hover .st-poster, .st-card:focus-visible .st-poster { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(0, 0, 0, .35), 0 0 0 2px var(--accent); }
+.st-card-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-card-sub { margin-top: -2px; }
+.st-progress { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 4px; border-radius: 4px; background: rgba(255, 255, 255, .3); z-index: 2; overflow: hidden; }
+.st-progress i { display: block; height: 100%; background: var(--accent); }
+.st-more { display: flex; justify-content: center; }
+
+.st-detail { position: relative; min-height: 100%; }
+.st-backdrop { position: absolute; inset: 0 0 auto; height: 420px; background-size: cover; background-position: center top; opacity: .35; mask-image: linear-gradient(to bottom, #000 30%, transparent); -webkit-mask-image: linear-gradient(to bottom, #000 30%, transparent); pointer-events: none; }
+.st-detail-body { position: relative; padding: 26px 22px 30px; display: flex; flex-direction: column; gap: 22px; }
+.st-detail-top { display: flex; gap: 22px; align-items: flex-start; }
+.st-detail-poster { width: 190px; flex: none; border-radius: var(--r-md); box-shadow: 0 16px 40px rgba(0, 0, 0, .45); }
+.st-detail-info { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.st-detail-info h1 { margin: 0; font-size: 28px; line-height: 1.15; }
+.st-logo { max-width: min(360px, 100%); max-height: 110px; object-fit: contain; object-position: left; }
+.st-facts { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--text-2); font-weight: 550; font-size: 13px; }
+.st-desc { margin: 0; line-height: 1.55; max-width: 720px; }
+.st-people { font-size: 13px; }
+.st-detail-info .hero-actions { margin-top: 4px; flex-wrap: wrap; }
+.st-episodes, .st-streams { display: flex; flex-direction: column; gap: 10px; }
+.st-episode-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.st-episode { display: flex; gap: 10px; align-items: center; padding: 6px; border-radius: var(--r-md); text-align: left; background: var(--field); border: 1px solid transparent; }
+.st-episode:hover:not(:disabled) { background: var(--hover); }
+.st-episode.active { border-color: var(--accent); background: var(--accent-soft); }
+.st-episode:disabled { opacity: .5; }
+.st-episode img, .st-ep-num { width: 96px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; flex: none; background: var(--active); display: grid; place-items: center; font-weight: 700; color: var(--muted); }
+.st-ep-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.st-ep-title { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.st-hint { padding: 4px 2px; }
+.st-stream-group { display: flex; flex-direction: column; gap: 6px; }
+.st-stream-addon { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 13px; color: var(--text-2); }
+.st-stream-addon img { width: 18px; height: 18px; border-radius: 4px; object-fit: cover; }
+.st-stream-list { display: flex; flex-direction: column; gap: 6px; }
+.st-stream { display: grid; grid-template-columns: 110px 1fr auto auto auto; cursor: pointer; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--r-md); text-align: left; background: var(--field); border: 1px solid var(--border); }
+.st-stream:hover { background: var(--hover); border-color: var(--accent); }
+.st-stream-name { display: flex; flex-direction: column; font-weight: 700; font-size: 13px; }
+.st-stream-title { display: flex; flex-direction: column; gap: 2px; font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.st-no-streams { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: var(--r-md); background: var(--field); border: 1px dashed var(--border); }
+.st-no-streams > div { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.st-install { display: flex; gap: 8px; }
+.st-import { margin-top: -6px; flex-wrap: wrap; }
+.st-account { display: flex; align-items: center; gap: 12px; }
+.st-account > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.st-account strong { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 760px) { .st-account { flex-wrap: wrap; } }
+.st-links { height: auto; padding: 9px 11px; resize: vertical; font-family: ui-monospace, monospace; font-size: 12px; }
+.tr-section { padding: 10px 12px 4px; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.st-addons { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.st-addon { display: flex; gap: 12px; align-items: flex-start; }
+.st-addon-logo { width: 44px; height: 44px; border-radius: 10px; object-fit: contain; flex: none; background: var(--active); display: grid; place-items: center; }
+.st-addon-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.st-addon-desc { line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.st-addon-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+@media (max-width: 760px) {
+  .st-home, .st-page { padding: 12px 12px 24px; }
+  .st-detail-body { padding: 18px 14px 24px; }
+  .st-detail-top { flex-direction: column; }
+  .st-detail-poster { width: 130px; }
+  .st-card { width: 112px; }
+  .st-card.wide { width: 200px; }
+  .st-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+  .st-stream { grid-template-columns: 1fr auto auto auto; }
+  .st-stream-name { grid-column: 1 / -1; flex-direction: row; gap: 6px; }
+  .st-install { flex-direction: column; }
+  .app-stremio .search-input { flex: 1; width: auto; }
+}

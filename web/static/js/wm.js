@@ -54,6 +54,7 @@ export function openApp(id, args = {}, opts = {}) {
 // Opens a file in the app that suits it, or downloads it.
 export function openFile(entry, context = {}) {
   const kind = kindOf(entry);
+  if (!entry.dir && entry.name.toLowerCase().endsWith('.torrent')) return openApp('torrents', { path: entry.path });
   if (kind === 'video') return openApp('video', { path: entry.path, siblings: (context.siblings || []).filter((p) => kindOf({ name: p }) === 'video') });
   if (kind === 'image') return openApp('viewer', { path: entry.path, siblings: (context.siblings || []).filter((p) => kindOf({ name: p }) === 'image') });
   if (kind === 'audio') return openApp('music', { play: entry.path });

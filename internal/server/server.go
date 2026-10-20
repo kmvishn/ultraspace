@@ -20,12 +20,17 @@ import (
 	"ultraspace/internal/config"
 	"ultraspace/internal/files"
 	"ultraspace/internal/httpx"
+	"ultraspace/internal/mediasrc"
 	"ultraspace/internal/monitor"
 	"ultraspace/internal/navidrome"
 	"ultraspace/internal/remote"
 	"ultraspace/internal/services"
 	"ultraspace/internal/state"
 	"ultraspace/internal/store"
+	"ultraspace/internal/stremio"
+	"ultraspace/internal/sysmem"
+	"ultraspace/internal/torrent"
+	"ultraspace/internal/webdl"
 	"ultraspace/web"
 )
 
@@ -49,7 +54,41 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 		Profile: cfg.MemoryProfile,
 	}, log)
 	fm.SetThumbDir(filepath.Join(cfg.DataDir, "thumbs"))
-	cleanup := func() { rb.Shutdown(); fm.Close(); st.Close() }
+	sources := mediasrc.New(log)
+	fm.SetSources(sources)
+	var tm *torrent.Manager
+	if !cfg.Torrent.Disabled {
+		tm, err = torrent.New(torrent.Options{
+			Dir:       filepath.Join(cfg.FilesRoot, cfg.Torrent.Folder),
+			FilesPath: "/" + filepath.ToSlash(cfg.Torrent.Folder),
+			StateDir:  filepath.Join(cfg.DataDir, "torrents"),
+			Port:      cfg.Torrent.Port,
+			SeedRatio: cfg.Torrent.SeedRatio,
+			Profile:   sysmem.Pick(cfg.MemoryProfile),
+			Log:       log,
+		})
+		if err != nil {
+			fm.Close()
+			st.Close()
+			return nil, nil, fmt.Errorf("torrents: %w", err)
+		}
+		sources.Handle("torrent", tm.Resolve)
+	}
+	dl, err := webdl.New(cfg.FilesRoot, log)
+	if err != nil {
+		fm.Close()
+		st.Close()
+		return nil, nil, err
+	}
+	cleanup := func() {
+		rb.Shutdown()
+		dl.Close()
+		if tm != nil {
+			tm.Close()
+		}
+		fm.Close()
+		st.Close()
+	}
 
 	proxy := httpx.Proxy{Trust: cfg.TrustProxy}
 	a, err := auth.New(st, auth.Options{
@@ -65,6 +104,9 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 	mon := monitor.New(version, []monitor.Disk{{Label: "System", Path: "/"}, {Label: "Files", Path: cfg.FilesRoot}})
 	go mon.Run(ctx)
 	go a.PurgeLoop(ctx)
+	if tm != nil {
+		go tm.Run(ctx)
+	}
 
 	mux := http.NewServeMux()
 	a.Register(mux)
@@ -76,6 +118,16 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 	rb.Register(mux, a.Require)
 	navidrome.New(st, log).Register(mux, a.Require)
 	clip.New(st, log).Register(mux, a.Require)
+	sources.Register(mux, a.Require)
+	dl.Register(mux, a.Require)
+	stremio.New(st, log).Register(mux, a.Require)
+	if tm != nil {
+		tm.Register(mux, a.Require)
+	} else {
+		mux.Handle("/api/torrents", a.Require(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			httpx.Error(w, http.StatusNotImplemented, "the torrent client is turned off in the server's config")
+		})))
+	}
 	agent.NewClient(cfg.AgentSocket, proxy, cfg.PublicOrigin).Register(mux, a.Require)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": version})

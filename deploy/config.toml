@@ -26,3 +26,10 @@ memory_profile = "auto"
 [browser]
 chrome = "/opt/ultraspace/chrome/chrome-headless-shell"
 # idle = "5m"   # default comes from memory_profile
+
+# BitTorrent client for the Torrents app and Stremio torrent streams. Downloads go to
+# Files → Torrents. Open the port (TCP and UDP) in the firewall for faster downloads.
+[torrent]
+port = 42069
+seed_ratio = 1.0
+# disabled = true
