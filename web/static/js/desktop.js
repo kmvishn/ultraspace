@@ -188,7 +188,24 @@ function buildDock() {
       h('span', { class: 'dock-dot' }));
     });
     dockEl.replaceChildren(...items);
+    edges();
   };
+  // The dock scrolls sideways when the apps do not fit (phones, or many apps): fade the
+  // edge that has more, and let a mouse wheel scroll it too.
+  const edges = () => {
+    const more = dockEl.scrollWidth - dockEl.clientWidth > 2;
+    dockEl.classList.toggle('more-left', more && dockEl.scrollLeft > 2);
+    dockEl.classList.toggle('more-right', more && dockEl.scrollLeft < dockEl.scrollWidth - dockEl.clientWidth - 2);
+  };
+  dockEl.addEventListener('scroll', edges, { passive: true });
+  dockEl.addEventListener('wheel', (e) => {
+    if (dockEl.scrollWidth <= dockEl.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    e.preventDefault();
+    dockEl.scrollLeft += e.deltaY;
+  }, { passive: false });
+  const onResize = () => edges();
+  addEventListener('resize', onResize);
+  cleanup.push(() => removeEventListener('resize', onResize));
   render();
   cleanup.push(on('windows', render));
   return h('div', { class: 'dock-wrap' }, dockEl);

@@ -134,7 +134,12 @@ function mountNotes(win, args) {
     const has = !!current;
     main.classList.toggle('hidden', !has);
     empty.classList.toggle('hidden', has);
-    if (!has) { win.setTitle('Notes'); renderList(); return; }
+    if (!has) {
+      win.setTitle('Notes');
+      renderList();
+      if (matchMedia('(max-width: 760px)').matches) requestAnimationFrame(() => win.toggleDrawer(true)); // on phones, show the list
+      return;
+    }
     titleIn.value = noteName(current.path);
     area.value = current.text;
     applyMode();

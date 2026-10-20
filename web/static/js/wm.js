@@ -45,6 +45,7 @@ export function openApp(id, args = {}, opts = {}) {
   }
   const win = new Win(app, opts.geom);
   win.handle = app.mount(win, args) || {};
+  win.checkSide();
   win.focus();
   if (opts.geom?.min) win.minimize();
   return win;
@@ -85,13 +86,22 @@ class Win {
       h('button', { class: 'light close', 'aria-label': 'Close', onclick: (e) => { e.stopPropagation(); this.close(); } }, icon('x', 9)),
       h('button', { class: 'light min', 'aria-label': 'Minimize', onclick: (e) => { e.stopPropagation(); this.minimize(); } }, icon('minus', 9)),
       h('button', { class: 'light max', 'aria-label': 'Maximize', onclick: (e) => { e.stopPropagation(); this.toggleMax(); } }, icon('square', 8)));
-    this.bar = h('div', { class: 'win-bar' }, lights, this.titleEl, this.actionsEl);
+    // Phones only (hidden by CSS elsewhere): opens the app's sidebar as a drawer.
+    this.menuBtn = h('button', { class: 'win-menu', 'aria-label': 'Show sidebar', onclick: (e) => { e.stopPropagation(); this.toggleDrawer(); } }, icon('list', 18));
+    this.bar = h('div', { class: 'win-bar' }, lights, this.menuBtn, this.titleEl, this.actionsEl);
     this.body = h('div', { class: 'win-body' });
     this.el = h('div', { class: 'win opening', dataset: { app: app.id }, role: 'dialog', 'aria-label': app.name },
       this.bar, this.body,
       ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].map((d) => h('div', { class: `rz rz-${d}`, dataset: { dir: d } })));
 
     this.el.addEventListener('pointerdown', () => this.focus(), true);
+    // Choosing something in the drawer closes it; tapping outside it does too.
+    this.el.addEventListener('click', (e) => {
+      if (!this.el.classList.contains('drawer-open')) return;
+      const side = e.target.closest('.side');
+      if (!side) { if (!e.target.closest('.win-menu')) this.toggleDrawer(false); return; }
+      if (e.target.closest('button') && !e.target.closest('input, textarea, .notes-side-top')) setTimeout(() => this.toggleDrawer(false), 120);
+    });
     this.bar.addEventListener('dblclick', (e) => { if (!e.target.closest('button, input')) this.toggleMax(); });
     this.bar.addEventListener('pointerdown', (e) => this.startDrag(e));
     this.el.querySelectorAll('.rz').forEach((r) => r.addEventListener('pointerdown', (e) => this.startResize(e, r.dataset.dir)));
@@ -117,6 +127,16 @@ class Win {
     layer.append(this.el);
     requestAnimationFrame(() => this.el.classList.remove('opening'));
     emit('windows');
+  }
+
+  // Apps with a sidebar get the phone drawer button; apps can call this after re-rendering.
+  checkSide() {
+    this.el.classList.toggle('has-side', !!this.body.querySelector('.side'));
+  }
+
+  toggleDrawer(open = !this.el.classList.contains('drawer-open')) {
+    this.checkSide();
+    this.el.classList.toggle('drawer-open', open && this.el.classList.contains('has-side'));
   }
 
   area() {
