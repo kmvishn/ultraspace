@@ -1,0 +1,47 @@
+[Unit]
+Description=ultraspace personal server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ultraspace
+Group=ultraspace
+# Read-only access to the system journal for the Logs and Services views.
+SupplementaryGroups=systemd-journal
+ExecStart=/usr/local/bin/ultraspace -config /etc/ultraspace/config.toml
+Restart=on-failure
+RestartSec=3
+# Soft memory target for the Go runtime; keeps the footprint small on 1 GB hosts.
+Environment=GOMEMLIMIT=64MiB
+# The remote browser (Chrome) runs inside this service; cap it so it can never starve the host.
+MemoryHigh=600M
+MemoryMax=750M
+
+StateDirectory=ultraspace
+StateDirectoryMode=0750
+UMask=0027
+
+# Hardening: the service can write only to /var/lib/ultraspace.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Chrome's own sandbox needs user, PID and network namespaces (see apparmor-ultraspace-chrome).
+RestrictNamespaces=user pid net
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# MemoryDenyWriteExecute is off: Chrome's JavaScript engine compiles code at run time.
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

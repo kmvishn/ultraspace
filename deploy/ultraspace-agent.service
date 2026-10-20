@@ -1,0 +1,20 @@
+# Terminal and VS Code backend. Runs as your login user, so the web Terminal can do
+# whatever that user can (including sudo, if the user has it).
+[Unit]
+Description=ultraspace agent (Terminal and VS Code)
+Requires=ultraspace-agent.socket
+After=network-online.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+ExecStart=/usr/local/bin/ultraspace agent -code-server /opt/ultraspace/code-server/bin/code-server
+RuntimeDirectory=ultraspace-agent
+RuntimeDirectoryMode=0700
+Restart=on-failure
+RestartSec=3
+# code-server and your builds run here; throttle before the host runs out of memory.
+MemoryHigh=700M
+
+[Install]
+WantedBy=multi-user.target

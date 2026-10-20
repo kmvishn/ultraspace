@@ -1,0 +1,23 @@
+# /etc/ultraspace/config.toml
+
+# Keep this on loopback; nginx terminates HTTPS in front of it.
+listen = "127.0.0.1:4600"
+
+# Database and setup token live here.
+data_dir = "/var/lib/ultraspace"
+
+# The file manager is confined to this folder (default: <data_dir>/files).
+# files_root = "/var/lib/ultraspace/files"
+
+# The public URL, accepted in Origin checks.
+public_origin = "https://ultraspace.example.com"
+
+# Trust X-Forwarded-Proto / X-Real-IP from nginx on 127.0.0.1.
+trust_proxy = true
+
+session_ttl = "720h"
+
+# Remote browser for the Browser app (chrome-headless-shell from Chrome for Testing).
+[browser]
+chrome = "/opt/ultraspace/chrome/chrome-headless-shell"
+idle = "10m"

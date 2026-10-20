@@ -1,0 +1,13 @@
+# Socket for the Terminal and VS Code backend. Only the ultraspace service (group
+# ultraspace) may connect; it checks the web login before proxying.
+[Unit]
+Description=ultraspace agent socket (Terminal and VS Code)
+
+[Socket]
+ListenStream=/run/ultraspace-agent.sock
+SocketUser=ubuntu
+SocketGroup=ultraspace
+SocketMode=0660
+
+[Install]
+WantedBy=sockets.target
