@@ -2,10 +2,14 @@
 
 > **Bored of plain SSH to your server? Try ultraspace — your friendly neighbourhood Go application.**
 
-**Your own server, as a desktop in the browser.** ultraspace is a single Go binary that turns a
-small Linux VPS into a personal web desktop: files, system monitor, music player, a real web
-browser, a terminal, VS Code, a torrent client and a Stremio-compatible media centre — all in windows
-you can drag, snap and resize, from any device.
+**Any Linux box, as a desktop in the browser.** ultraspace is a single Go binary that turns a home server, a
+Raspberry Pi, an old laptop in a cupboard or a cloud VPS into a personal web desktop: files, system monitor,
+music player, a real web browser, a terminal, VS Code, a torrent client and a Stremio-compatible media centre —
+all in windows you can drag, snap and resize, from any device on your network (or anywhere, if you want).
+
+No desktop environment on the server: no X11 or Wayland, no VNC, no xrdp, no remote-desktop client to install.
+Copy one file, start it, open a browser. That is the whole idea — a usable interface for the machines in your
+home lab, without turning them into a workstation.
 
 Sign in on your laptop, close the lid, open your phone: the same windows, tabs, terminal sessions,
 song and position are waiting for you.
@@ -23,6 +27,8 @@ song and position are waiting for you.
 ```
 
 - **One binary**, no runtime dependencies, no build step for the frontend. ~27 MB on disk, ~15 MB of RAM idle.
+- **Runs where your machines are**: on your local network with nothing else, or on a VPS behind HTTPS. A
+  cloud server is entirely optional.
 - **Desktop UI**: lock screen, menu bar with live stats, dock, widgets, Ctrl+K launcher, light/dark themes, wallpapers.
 - **Follows you everywhere**: the workspace is saved on the server and restored on any device.
 - **Heavy parts start on demand**: Chrome, VS Code and the torrent engine run only while needed and stop when idle.
@@ -31,13 +37,35 @@ song and position are waiting for you.
 
 ---
 
+## Where it runs
+
+| Setup | What you need | Good for |
+| --- | --- | --- |
+| **Home network** (simplest) | the binary, `listen = "0.0.0.0:4600"` | a home server, NAS box, Raspberry Pi or old PC; open `http://<its-ip>:4600` from any device at home |
+| **Home network + HTTPS** | add Caddy/nginx with a local certificate, or Tailscale (`tailscale serve`) | the same, with every browser feature on and access from outside home over your tailnet |
+| **VPS** | nginx + a domain + Let's Encrypt (steps below) | a machine that is always on and reachable from anywhere |
+
+- **Machines**: Linux on x86-64 or arm64 (Raspberry Pi 4/5 with a 64-bit OS), from 512 MB of RAM. On ARM boards
+  everything works except the server browser, because Chrome for Testing has no Linux ARM build (the Browser
+  app uses light mode there).
+- **No HTTPS?** Fine on a trusted home network. Browsers only allow a few features on secure pages, so copy
+  buttons (clipboard) and some media keys need HTTPS or `localhost`; everything else works over plain HTTP.
+- **Away from home** without opening ports: put the machine on [Tailscale](https://tailscale.com) (or WireGuard)
+  and use its tailnet address; `tailscale serve` also gives you HTTPS.
+- The server Browser, Stremio and the torrent engine deliberately refuse private addresses, so the box itself
+  and your LAN cannot be reached through them. To open your router or NAS pages, use your own browser.
+
+---
+
 ## Contents
 
+- [Where it runs](#where-it-runs)
 - [Apps](#apps)
 - [How it works](#how-it-works)
 - [Security model](#security-model)
 - [Requirements](#requirements)
 - [Quick start (local)](#quick-start-local)
+- [Home lab / local network](#home-lab--local-network)
 - [Installing on a server](#installing-on-a-server)
 - [Configuration](#configuration)
 - [Using it](#using-it)
@@ -300,7 +328,8 @@ ultraspace ships no stream addons. Only install addons you trust and only watch 
 
 ## Security model
 
-ultraspace is built for one person (or a few trusted people) exposing a personal server to the internet.
+ultraspace is built for one person (or a few trusted people), on a home network or exposed to the internet.
+The protections below are on in both cases.
 
 **Accounts and sessions**
 - The first account can only be created with a one-time **setup token** written to the data directory
@@ -370,9 +399,9 @@ and cgroup protection, address-family restrictions, and memory limits so Chrome 
 ## Requirements
 
 - Linux, x86-64 or arm64. Tested on **Ubuntu 24.04** with 1 GB of RAM and 2 GB of swap.
-- Go **1.26+** to build.
-- nginx (or any TLS reverse proxy) and a domain for HTTPS — a free [DuckDNS](https://www.duckdns.org) name and
-  Let's Encrypt work well.
+- Go **1.26+** to build (or use a release binary).
+- For a server on the internet: nginx (or any TLS reverse proxy) and a domain for HTTPS — a free
+  [DuckDNS](https://www.duckdns.org) name and Let's Encrypt work well. On a home network neither is needed.
 - Optional:
   - [chrome-headless-shell](https://googlechromelabs.github.io/chrome-for-testing/) for the server browser
     (~270 MB on disk).
@@ -402,9 +431,34 @@ On Ubuntu 23.10+ Chrome's sandbox needs the AppArmor profile from `deploy/`; for
 
 ---
 
+## Home lab / local network
+
+No domain, no proxy, no cloud. On the machine (Debian, Ubuntu, Raspberry Pi OS 64-bit, Fedora…):
+
+```sh
+make build                 # or: make build-arm64 for a Raspberry Pi
+sudo install -m 755 bin/ultraspace /usr/local/bin/ultraspace
+sudo useradd --system --home /var/lib/ultraspace --shell /usr/sbin/nologin ultraspace
+sudo mkdir -p /etc/ultraspace
+printf 'listen = "0.0.0.0:4600"\n' | sudo tee /etc/ultraspace/config.toml
+sudo cp deploy/ultraspace.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now ultraspace
+sudo cat /var/lib/ultraspace/setup-token   # paste on the welcome screen
+```
+
+Then open `http://<the-machine's-ip>:4600` on any phone, tablet or computer at home. The optional parts
+(server browser, Terminal and VS Code, sound, video conversion) install the same way as on a VPS: steps 4 and 5
+below. Keep `trust_proxy = false` when nothing sits in front of ultraspace.
+
+Want HTTPS at home? Put [Caddy](https://caddyserver.com) in front (`reverse_proxy 127.0.0.1:4600` with
+`tls internal`), or run `tailscale serve --bg 4600` for a tailnet HTTPS address; then set `listen` back to
+`127.0.0.1:4600`, `trust_proxy = true` and `public_origin` to that address.
+
+---
+
 ## Installing on a server
 
-The steps below match the files in `deploy/`. Replace `ultraspace.example.com` with your domain and `ubuntu` with
+The steps below are for a VPS reachable from the internet and match the files in `deploy/`. Replace `ultraspace.example.com` with your domain and `ubuntu` with
 the user Terminal and VS Code should run as.
 
 ### 1. Build and copy the binary
