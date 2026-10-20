@@ -246,6 +246,30 @@ export function menu(x, y, items) {
 }
 
 addEventListener('pointerdown', (e) => { if (openMenu && !openMenu.contains(e.target)) closeMenu(); }, true);
+
+// iPhone and iPad Safari never fire "contextmenu", so a long press stands in for a
+// right-click there (Android browsers already do this themselves).
+const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+if (iOS) {
+  let timer = null, start = null, fired = false;
+  addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    start = { x: t.clientX, y: t.clientY, target: e.target };
+    fired = false;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      fired = true;
+      start.target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: start.x, clientY: start.y }));
+    }, 520);
+  }, { passive: true });
+  addEventListener('touchmove', (e) => {
+    const t = e.touches[0];
+    if (start && Math.hypot(t.clientX - start.x, t.clientY - start.y) > 10) clearTimeout(timer);
+  }, { passive: true });
+  addEventListener('touchend', (e) => { clearTimeout(timer); if (fired) e.preventDefault(); }, { passive: false });
+  addEventListener('touchcancel', () => clearTimeout(timer));
+}
 addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
 addEventListener('blur', closeMenu);
 

@@ -201,6 +201,11 @@ button:disabled { cursor: default; opacity: .45; }
   max-width: calc(100vw - 24px); overflow-x: auto; scrollbar-width: none;
 }
 .dock::-webkit-scrollbar { display: none; }
+.dock { scroll-snap-type: x proximity; overscroll-behavior-x: contain; scroll-padding: 0 10px; }
+.dock-item { flex: none; scroll-snap-align: start; }
+.dock.more-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); }
+.dock.more-left { -webkit-mask-image: linear-gradient(to right, transparent, #000 36px); mask-image: linear-gradient(to right, transparent, #000 36px); }
+.dock.more-left.more-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 36px, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, transparent, #000 36px, #000 calc(100% - 36px), transparent); }
 .dock-item { position: relative; display: flex; flex-direction: column; align-items: center; padding: 0 2px; }
 .dock-tile {
   width: 50px; height: 50px; border-radius: 14px; display: grid; place-items: center; color: #fff;
@@ -986,3 +991,34 @@ kbd { font-family: var(--font); font-size: 11px; padding: 2px 6px; border-radius
 .pick-row.selected .pick-size { color: rgba(255, 255, 255, .8); }
 .desktop.dropping::after { content: "Drop to upload to Files"; position: fixed; inset: 48px 16px 100px; z-index: 5; border: 2px dashed rgba(255, 255, 255, .7); border-radius: 18px; background: rgba(0, 0, 0, .25); display: grid; place-items: center; font-size: 18px; font-weight: 650; color: #fff; pointer-events: none; }
 .win-body.dropping { outline: 2px dashed var(--accent); outline-offset: -6px; }
+
+/* ---------- phones: sidebar drawer and touch sizes (desktop unaffected) ---------- */
+
+.win-menu { display: none; }
+@media (max-width: 760px) {
+  .win.has-side .win-menu { display: grid; place-items: center; width: 34px; height: 34px; margin-left: -6px; border-radius: 9px; color: var(--text-2); flex: none; }
+  .win.has-side .win-menu:active { background: var(--active); }
+  .win.has-side .side {
+    display: flex !important; position: absolute; top: 0; bottom: 0; left: 0; z-index: 21; width: min(290px, 84%);
+    transform: translateX(-104%); transition: transform .24s var(--ease); box-shadow: 10px 0 34px rgba(0, 0, 0, .4);
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+  .win.drawer-open .side { transform: none; }
+  .win.drawer-open .app::after { content: ""; position: absolute; inset: 0; z-index: 20; background: rgba(0, 0, 0, .42); animation: fade .2s; }
+  .win.drawer-open .win-menu { color: var(--accent); }
+  .side-item { height: 42px; font-size: 15px; }
+  .win-title { padding-right: 10px; }
+  .lights { gap: 10px; }
+  .light { width: 16px; height: 16px; }
+  .icon-btn { width: 36px; height: 36px; }
+  /* iOS zooms into inputs smaller than 16px */
+  input, textarea, select { font-size: 16px !important; }
+  /* menus become a sheet at the bottom of the screen */
+  .menu { left: 8px !important; right: 8px; top: auto !important; bottom: calc(8px + env(safe-area-inset-bottom)); min-width: 0; padding: 6px; border-radius: 16px; animation: slideup .18s var(--ease); max-height: 70vh; overflow-y: auto; }
+  .menu-item { height: 44px; font-size: 15px; }
+  #toasts { top: auto; bottom: calc(92px + env(safe-area-inset-bottom)); left: 8px; right: 8px; width: auto; }
+  .dialog { border-radius: 18px; }
+  .dock-wrap { left: 8px; right: 8px; bottom: calc(6px + env(safe-area-inset-bottom)); }
+  .dock { max-width: 100%; gap: 4px; padding: 7px 8px 8px; }
+}
+@keyframes slideup { from { transform: translateY(16px); opacity: 0; } }
