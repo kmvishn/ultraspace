@@ -90,12 +90,30 @@ func TestFilesIntoPages(t *testing.T) {
 	in.dropFiles(200, 200, files)
 	wait(t, in, "the drop", func() bool { return eval(`window.dropped || ''`) == `"hello.txt:11"` })
 
-	// 3. Pasting a file.
-	taken, err := in.pasteFiles(files)
+	// 3. Pasting a file, including one far above the old 10 MB limit.
+	big, _, err := m.put(1, "big.bin", io.LimitReader(zeros{}, 25<<20))
+	if err != nil {
+		t.Fatal(err)
+	}
+	taken, err := in.pasteFiles(m.resolve(1, []string{big}))
+	if err != nil || !taken {
+		t.Fatalf("big paste taken=%v err=%v", taken, err)
+	}
+	if got := eval(`window.pasted`); got != `"big.bin:26214400"` {
+		t.Fatalf("big pasted = %s", got)
+	}
+	taken, err = in.pasteFiles(files)
 	if err != nil || !taken {
 		t.Fatalf("paste taken=%v err=%v", taken, err)
 	}
 	if got := eval(`window.pasted`); got != `"hello.txt:11"` {
 		t.Fatalf("pasted = %s", got)
 	}
+}
+
+type zeros struct{}
+
+func (zeros) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
 }

@@ -3,12 +3,9 @@ package remote
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io"
-	"mime"
 	"net/http"
 	"os"
 	"path"
@@ -27,10 +24,7 @@ import (
 // staged in the browser's own directory and referred to by an opaque id, so the
 // page side never names a path on the server.
 
-const (
-	stageTTL     = 6 * time.Hour
-	maxPasteSize = 10 << 20 // pasted files travel inside a DevTools message
-)
+const stageTTL = 6 * time.Hour
 
 type staged struct {
 	path    string
@@ -230,50 +224,45 @@ func (in *instance) dropFiles(x, y float64, files []staged) {
 }
 
 // pasteFiles fires a paste event carrying the files at the focused element, the way
-// pasting an image into a chat or mail page works.
+// pasting an image into a chat or mail page works. The files reach the page through a
+// hidden file input (as with the upload button), so they come straight from disk:
+// no size limit and no copy through the DevTools connection.
 func (in *instance) pasteFiles(files []staged) (bool, error) {
 	sess := in.activeSession()
 	if sess == "" || len(files) == 0 {
 		return false, errors.New("no page")
 	}
-	type item struct {
-		Name string `json:"name"`
-		Type string `json:"type"`
-		B64  string `json:"b64"`
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var made struct {
+		Result struct {
+			ObjectID string `json:"objectId"`
+		} `json:"result"`
 	}
-	var list []item
-	total := 0
-	for _, f := range files {
-		b, err := os.ReadFile(f.path)
-		if err != nil {
-			return false, err
-		}
-		if total += len(b); total > maxPasteSize {
-			return false, errors.New("pasted files are limited to 10 MB; drag larger files onto the page instead")
-		}
-		typ := mime.TypeByExtension(strings.ToLower(filepath.Ext(f.name)))
-		list = append(list, item{Name: f.name, Type: typ, B64: base64.StdEncoding.EncodeToString(b)})
+	const mk = `(() => { const i = document.createElement('input'); i.type = 'file'; i.multiple = true; i.style.display = 'none'; (document.body || document.documentElement).append(i); return i; })()`
+	if err := in.conn.Call(ctx, sess, "Runtime.evaluate", map[string]any{"expression": mk}, &made); err != nil || made.Result.ObjectID == "" {
+		return false, errors.New("the page did not allow a paste")
 	}
-	arg, _ := json.Marshal(list)
-	js := `((files) => {
+	obj := made.Result.ObjectID
+	defer in.conn.Send(sess, "Runtime.releaseObject", map[string]string{"objectId": obj})
+	if err := in.conn.Call(ctx, sess, "DOM.setFileInputFiles", map[string]any{"files": paths(files), "objectId": obj}, nil); err != nil {
+		return false, err
+	}
+	const fire = `function () {
 		const dt = new DataTransfer();
-		for (const f of files) {
-			const bin = Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0));
-			dt.items.add(new File([bin], f.name, { type: f.type || 'application/octet-stream' }));
-		}
+		for (const f of this.files) dt.items.add(f);
+		this.remove();
 		const a = document.activeElement;
 		const target = a && a !== document.body ? a : document;
 		const ev = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
 		target.dispatchEvent(ev);
 		return ev.defaultPrevented;
-	})(` + string(arg) + `)`
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
+	}`
 	var res struct {
 		Result struct {
 			Value bool `json:"value"`
 		} `json:"result"`
 	}
-	err := in.conn.Call(ctx, sess, "Runtime.evaluate", map[string]any{"expression": js, "returnByValue": true, "userGesture": true}, &res)
+	err := in.conn.Call(ctx, sess, "Runtime.callFunctionOn", map[string]any{"objectId": obj, "functionDeclaration": fire, "returnByValue": true, "userGesture": true}, &res)
 	return res.Result.Value, err
 }
