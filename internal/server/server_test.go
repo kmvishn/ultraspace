@@ -914,3 +914,93 @@ func TestPatternLock(t *testing.T) {
 		t.Fatalf("login without pattern = %d %v", code, out)
 	}
 }
+
+func TestTorrentsStremioAndMediaSources(t *testing.T) {
+	c, cfg := setup(t)
+	c.do("POST", "/api/setup", map[string]string{"token": token(t, cfg), "username": "admin", "password": "correct-horse-1"}, nil)
+
+	if code, out := c.do("GET", "/api/torrents", nil, nil); code != 200 || out["running"] != false {
+		t.Fatalf("torrents = %d %v", code, out)
+	}
+	if code, _ := c.do("POST", "/api/torrents", map[string]any{"magnet": "javascript:alert(1)"}, nil); code != 400 {
+		t.Fatalf("bad magnet = %d, want 400", code)
+	}
+	if code, _ := c.do("POST", "/api/torrents/abc/pause", nil, nil); code != 404 {
+		t.Fatalf("unknown torrent = %d, want 404", code)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.FilesRoot, "Torrents")); err != nil {
+		t.Fatalf("Torrents folder in Files: %v", err)
+	}
+
+	// Media sources: only known schemes, only http(s) addresses.
+	for _, src := range []string{"", "bogus:1", "url:file:///etc/passwd", "url:gopher://x", "torrent:zz:0"} {
+		if code, _ := c.do("GET", "/api/media/raw?src="+url.QueryEscape(src), nil, nil); code < 400 || code >= 500 {
+			t.Errorf("raw %q = %d, want 4xx", src, code)
+		}
+		if code, _ := c.do("GET", "/api/files/probe?src="+url.QueryEscape(src), nil, nil); code < 400 || code >= 500 {
+			t.Errorf("probe %q = %d, want 4xx", src, code)
+		}
+	}
+	// Loopback and the metadata service are refused even as stream addresses.
+	for _, src := range []string{"url:http://127.0.0.1:1/", "url:http://169.254.169.254/latest"} {
+		if code, _ := c.do("GET", "/api/media/raw?src="+url.QueryEscape(src), nil, nil); code != 502 {
+			t.Errorf("raw %q = %d, want 502", src, code)
+		}
+	}
+
+	// Stremio: only installed addons, only protocol resources, no private addresses.
+	addon := func(q url.Values) int {
+		code, _ := c.do("GET", "/api/stremio/addon?"+q.Encode(), nil, nil)
+		return code
+	}
+	if code := addon(url.Values{"addon": {"https://evil.example/manifest.json"}, "resource": {"catalog"}, "type": {"movie"}, "id": {"top"}}); code != 403 {
+		t.Fatalf("uninstalled addon = %d, want 403", code)
+	}
+	if code := addon(url.Values{"addon": {"https://v3-cinemeta.strem.io/manifest.json"}, "resource": {"admin"}, "type": {"movie"}, "id": {"top"}}); code != 400 {
+		t.Fatalf("unknown resource = %d, want 400", code)
+	}
+	if code := addon(url.Values{"addon": {"https://v3-cinemeta.strem.io/manifest.json"}, "resource": {"meta"}, "type": {"movie"}, "id": {"../../x"}}); code != 400 && code != 502 {
+		// "../../x" is escaped into one path element; it must never climb out of the addon.
+		t.Fatalf("traversal id = %d", code)
+	}
+	// An addon the user installed but that points at loopback is still unreachable.
+	doc := map[string]any{"device": "d1", "data": map[string]any{"addons": []map[string]any{{"url": "http://127.0.0.1:9/manifest.json"}}}}
+	if code, _ := c.do("PUT", "/api/state/stremio", doc, nil); code != 200 {
+		t.Fatalf("save addons = %d", code)
+	}
+	if code := addon(url.Values{"addon": {"http://127.0.0.1:9/manifest.json"}, "resource": {"catalog"}, "type": {"movie"}, "id": {"top"}}); code != 502 {
+		t.Fatalf("loopback addon = %d, want 502", code)
+	}
+	if code, _ := c.do("POST", "/api/stremio/manifest", map[string]string{"url": "http://169.254.169.254/"}, nil); code != 502 {
+		t.Fatalf("metadata-service manifest = %d, want 502", code)
+	}
+	if code, _ := c.do("GET", "/api/stremio/img?u="+url.QueryEscape("http://127.0.0.1:1/a.png"), nil, nil); code != 502 {
+		t.Fatalf("loopback image = %d, want 502", code)
+	}
+	if code, _ := c.do("GET", "/api/stremio/img?u="+url.QueryEscape("file:///etc/passwd"), nil, nil); code != 400 {
+		t.Fatalf("file image = %d, want 400", code)
+	}
+}
+
+func TestStremioAccountNotExposed(t *testing.T) {
+	c, cfg := setup(t)
+	c.do("POST", "/api/setup", map[string]string{"token": token(t, cfg), "username": "admin", "password": "correct-horse-1"}, nil)
+	if code, out := c.do("GET", "/api/stremio/account", nil, nil); code != 200 || out["signedIn"] != false {
+		t.Fatalf("account = %d %v", code, out)
+	}
+	for _, p := range []string{"/api/stremio/account/addons", "/api/stremio/account/library"} {
+		if code, _ := c.do("GET", p, nil, nil); code != 401 {
+			t.Errorf("%s signed out = %d, want 401", p, code)
+		}
+	}
+	if code, _ := c.do("POST", "/api/stremio/account/login", map[string]string{"email": "", "password": ""}, nil); code != 400 {
+		t.Errorf("empty login = %d, want 400", code)
+	}
+	// The stored session key can never be read or overwritten through the state API.
+	if code, _ := c.do("GET", "/api/state/stremio-account", nil, nil); code != 404 {
+		t.Errorf("read session record = %d, want 404", code)
+	}
+	if code, _ := c.do("PUT", "/api/state/stremio-account", map[string]any{"device": "d", "data": map[string]string{"authKey": "x"}}, nil); code != 404 {
+		t.Errorf("write session record = %d, want 404", code)
+	}
+}

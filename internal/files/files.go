@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"ultraspace/internal/httpx"
+	"ultraspace/internal/mediasrc"
 )
 
 var errBadPath = errors.New("invalid path")
@@ -31,10 +32,14 @@ type Files struct {
 	log      *slog.Logger
 	thumbDir string // thumbnail cache; empty disables caching
 	photos   photoCache
+	sources  *mediasrc.Registry // torrents and addon streams for the video player
 }
 
 // SetThumbDir sets where generated thumbnails are cached.
 func (f *Files) SetThumbDir(dir string) { f.thumbDir = dir }
+
+// SetSources lets the video player play media sources (?src=) besides library files.
+func (f *Files) SetSources(r *mediasrc.Registry) { f.sources = r }
 
 func New(dir string, log *slog.Logger) (*Files, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {

@@ -15,6 +15,8 @@ import './apps/code.js';
 import './apps/notes.js';
 import './apps/photos.js';
 import './apps/video.js';
+import './apps/torrents.js';
+import './apps/stremio.js';
 
 const app = document.getElementById('app');
 let user = null;

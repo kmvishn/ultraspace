@@ -1,6 +1,7 @@
-// Videos: a VLC-style player for video files in Files (or on this device). The server
-// picks the cheapest way your browser can play each file: as it is, repackaged, with
-// the audio converted, or fully converted. Positions are remembered on the server.
+// Videos: a VLC-style player for video files in Files (or on this device), torrents while
+// they download, and Stremio streams. The server picks the cheapest way your browser can
+// play each one: as it is, repackaged, with the audio converted, or fully converted.
+// Positions are remembered on the server.
 import { h, icon, api, report, toast, notice, menu, fileUrl, thumbUrl, baseOf, dirOf, fmtClock, debounce } from '../core.js';
 import { registerApp, openApp } from '../wm.js';
 import { device } from '../session.js';
@@ -32,9 +33,9 @@ const positions = {
     try { this.data = (await api('GET', '/api/state/media')).data?.positions || {}; } catch { this.data = {}; }
     return this.data;
   },
-  set(p, t, d) {
+  set(p, t, d, extra) {
     if (!this.data || !p || !d) return;
-    if (t < 10 || t > d - 20) delete this.data[p]; else this.data[p] = { t: Math.floor(t), d: Math.floor(d), at: Date.now() };
+    if (t < 10 || t > d - 20) delete this.data[p]; else this.data[p] = { ...extra, t: Math.floor(t), d: Math.floor(d), at: Date.now() };
     const keys = Object.keys(this.data).sort((a, b) => this.data[b].at - this.data[a].at);
     for (const k of keys.slice(200)) delete this.data[k];
     this.save();
@@ -62,7 +63,7 @@ function parseCues(text) {
 }
 
 function mountVideo(win, args) {
-  let item = null;      // { path, local, url, name }
+  let item = null;      // { path } (Files), { src, key, poster } (torrent/Stremio) or { local, url }; all have name
   let info = null;      // probe result
   let mode = 'direct';
   let offset = 0;       // stream modes start at this second of the file
@@ -77,7 +78,8 @@ function mountVideo(win, args) {
   const video = h('video', { class: 'vp-video', playsinline: true, preload: 'metadata' });
   try { video.volume = Number(localStorage.getItem('us.video.volume') ?? 1); } catch { /* default */ }
   const subs = h('div', { class: 'vp-subs' });
-  const spinner = h('div', { class: 'vp-spinner hidden' }, h('span', { class: 'bw-spin big' }));
+  const spinNote = h('div', { class: 'vp-spin-note' });
+  const spinner = h('div', { class: 'vp-spinner hidden' }, h('span', { class: 'bw-spin big' }), spinNote);
   const badge = h('span', { class: 'vp-badge hidden' });
   const flash = h('div', { class: 'vp-flash' });
 
@@ -112,10 +114,38 @@ function mountVideo(win, args) {
   const now = () => (isStream() ? offset : 0) + (video.currentTime || 0);
   const duration = () => (info?.duration || (Number.isFinite(video.duration) ? video.duration : 0)) || 0;
 
-  async function open(path, list) {
+  // what the server endpoints need to find the current item
+  const where = () => (item.src ? `src=${encodeURIComponent(item.src)}` : `path=${encodeURIComponent(item.path)}`);
+  const posKey = () => item?.key || item?.path;
+
+  function open(path, list) {
+    return load({ path, name: baseOf(path) }, list?.length ? list : [path]);
+  }
+
+  // openSrc plays a media source: { src, name, key, poster, subtitles: [{ lang, url }], meta }.
+  // meta ({ id, type, name, poster, video }) comes from Stremio; progress is reported to the
+  // signed-in Stremio account so continue watching works in the official apps too.
+  function openSrc(a) {
+    return load({ src: a.src, name: a.name || 'Video', key: a.key || a.src, poster: a.poster || '', extraSubs: a.subtitles || [], meta: a.meta || null }, []);
+  }
+
+  let lastSync = 0;
+  let stremioAccount = null; // checked once per window
+  async function syncStremio(force) {
+    const m = item?.meta;
+    if (!m || !duration() || (!force && Date.now() - lastSync < 60_000)) return;
+    lastSync = Date.now();
+    const t = now(), d = duration();
+    stremioAccount ||= api('GET', '/api/stremio/account').then((a) => a.signedIn).catch(() => false);
+    if (!(await stremioAccount)) return;
+    api('POST', '/api/stremio/account/library', { id: m.id, type: m.type, name: m.name, poster: m.poster, video: m.video, t, d }).catch(() => {});
+  }
+
+  async function load(next, list) {
     savePosition();
-    item = { path, name: baseOf(path) };
-    siblings = list?.length ? list : [path];
+    item = next;
+    const path = item.path;
+    siblings = list;
     cues = [];
     audioN = 0;
     quality = '';
@@ -123,24 +153,30 @@ function mountVideo(win, args) {
     win.setTitle(item.name);
     empty.classList.add('hidden');
     spinner.classList.remove('hidden');
+    spinNote.textContent = item.src?.startsWith('torrent:') ? 'Finding peers and the first pieces…' : item.src ? 'Connecting to the stream…' : '';
     navState();
+    const mine = item;
     const [res] = await Promise.all([
-      api('GET', `/api/files/probe?path=${encodeURIComponent(path)}&caps=${browserCaps()}`).catch((err) => ({ error: err.message })),
+      api('GET', `/api/files/probe?${where()}&caps=${browserCaps()}`).catch((err) => ({ error: err.message })),
       positions.load(),
     ]);
-    if (item?.path !== path) return;
+    if (item !== mine) return;
     if (res.error) { spinner.classList.add('hidden'); toast(`${item.name}: ${res.error}`, 'error'); showEmpty(); return; }
     info = res;
+    if (item.src && res.name && item.name === 'Video') { item.name = res.name; win.setTitle(item.name); }
+    for (const s of item.extraSubs || []) {
+      info.subtitles = [...(info.subtitles || []), { kind: 'src', src: `url:${s.url}`, lang: s.lang, title: s.lang ? `${s.lang} (addon)` : 'Addon subtitles' }];
+    }
     audioBtn.classList.toggle('hidden', (info.audio || []).length < 2);
     qualBtn.classList.toggle('hidden', !info.ffmpeg);
-    const saved = positions.data[path];
+    const saved = positions.data[posKey()];
     wantTime = saved && saved.t > 10 ? saved.t : 0;
     start(info.plan.mode, wantTime);
     if (wantTime) {
       const close = notice(`Resumed at ${fmtClock(wantTime)}`, [{ label: 'Start over', run: () => seekTo(0) }, { label: 'OK', primary: true }], 'history');
       setTimeout(close, 6000);
     }
-    if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: item.name, artist: dirOf(path).split('/').pop() || 'Videos' });
+    if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: item.name, artist: (path && dirOf(path).split('/').pop()) || 'Videos' });
   }
 
   function openLocal(file) {
@@ -167,11 +203,11 @@ function mountVideo(win, args) {
     spinner.classList.remove('hidden');
     if (mode === 'direct') {
       offset = 0;
-      video.src = fileUrl(item.path, true);
+      video.src = item.src ? `/api/media/raw?src=${encodeURIComponent(item.src)}` : fileUrl(item.path, true);
       wantTime = t;
     } else {
       offset = Math.max(0, t);
-      const q = new URLSearchParams({ path: item.path, t: offset.toFixed(2), audio: audioN, caps: browserCaps() });
+      const q = new URLSearchParams({ ...(item.src ? { src: item.src } : { path: item.path }), t: offset.toFixed(2), audio: audioN, caps: browserCaps() });
       if (quality) { q.set('mode', 'transcode'); q.set('h', quality); }
       video.src = `/api/files/stream?${q}`;
       wantTime = null;
@@ -250,7 +286,7 @@ function mountVideo(win, args) {
         if (i === audioN) return;
         const t = now();
         audioN = i;
-        const res = await api('GET', `/api/files/probe?path=${encodeURIComponent(item.path)}&audio=${i}&caps=${browserCaps()}`).catch(report);
+        const res = await api('GET', `/api/files/probe?${where()}&audio=${i}&caps=${browserCaps()}`).catch(report);
         if (res) { info.plan = res.plan; start(res.plan.mode === 'direct' ? 'remux' : res.plan.mode, t); }
       },
     })));
@@ -268,7 +304,9 @@ function mountVideo(win, args) {
   }
 
   async function loadSubs(s) {
-    const url = s.kind === 'file' ? `/api/files/subtitle?path=${encodeURIComponent(s.path)}` : `/api/files/subtitle?path=${encodeURIComponent(item.path)}&stream=${s.index}`;
+    const url = s.kind === 'file' ? `/api/files/subtitle?path=${encodeURIComponent(s.path)}`
+      : s.kind === 'src' ? `/api/files/subtitle?src=${encodeURIComponent(s.src)}`
+        : `/api/files/subtitle?${where()}&stream=${s.index}`;
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
@@ -347,7 +385,7 @@ function mountVideo(win, args) {
   video.addEventListener('loadedmetadata', () => {
     if (wantTime) { video.currentTime = wantTime; wantTime = null; }
   });
-  video.addEventListener('playing', () => spinner.classList.add('hidden'));
+  video.addEventListener('playing', () => { spinner.classList.add('hidden'); spinNote.textContent = ''; });
   video.addEventListener('waiting', () => spinner.classList.remove('hidden'));
   video.addEventListener('canplay', () => spinner.classList.add('hidden'));
   video.addEventListener('timeupdate', paint);
@@ -355,7 +393,7 @@ function mountVideo(win, args) {
   video.addEventListener('play', () => { playBtn.replaceChildren(icon('pause', 18)); stage.classList.remove('paused'); poke(); });
   video.addEventListener('pause', () => { playBtn.replaceChildren(icon('play', 18)); stage.classList.add('paused'); stage.classList.remove('idle'); savePosition(); });
   video.addEventListener('ended', () => {
-    if (item && !item.local) positions.set(item.path, 0, duration());
+    if (item && !item.local) { syncStremio(true); positions.set(posKey(), 0, duration()); }
     if (siblings.length > 1 && siblings.indexOf(item?.path) < siblings.length - 1) step(1);
   });
   video.addEventListener('error', () => {
@@ -374,7 +412,9 @@ function mountVideo(win, args) {
   });
 
   function savePosition() {
-    if (item && !item.local && duration()) positions.set(item.path, now(), duration());
+    if (!item || item.local || !duration()) return;
+    positions.set(posKey(), now(), duration(), item.src ? { src: item.src, name: item.name, poster: item.poster, meta: item.meta || undefined } : undefined);
+    syncStremio(video.paused);
   }
   saveTimer = setInterval(() => { if (!video.paused) savePosition(); }, 10_000);
 
@@ -429,22 +469,29 @@ function mountVideo(win, args) {
         h('button', { class: 'btn primary', onclick: async () => { const p = await pickFiles({ title: 'Choose a video' }); if (p?.[0]) open(p[0]); } }, icon('folder', 15), 'From Files'),
         h('button', { class: 'btn', onclick: () => localInput.click() }, icon('upload', 15), 'From this device')),
       list.length ? h('div', { class: 'vp-continue' }, h('div', { class: 'bw-section-title' }, icon('history', 14), 'Continue watching'),
-        list.map(([p, pos]) => h('button', { class: 'vp-cont-item', onclick: () => open(p) },
-          h('img', { src: thumbUrl(p, 256), alt: '', loading: 'lazy', onerror: (e) => e.target.replaceWith(h('span', { class: 'vp-cont-ph' }, icon('film', 18))) }),
-          h('span', { class: 'vp-cont-text' }, h('span', { class: 'vp-cont-name' }, baseOf(p)),
+        list.map(([p, pos]) => h('button', { class: 'vp-cont-item', onclick: () => (pos.src ? openSrc({ ...pos, key: p }) : open(p)) },
+          h('img', {
+            src: pos.src ? (pos.poster ? `/api/stremio/img?u=${encodeURIComponent(pos.poster)}` : '') : thumbUrl(p, 256), alt: '', loading: 'lazy',
+            onerror: (e) => e.target.replaceWith(h('span', { class: 'vp-cont-ph' }, icon('film', 18))),
+          }),
+          h('span', { class: 'vp-cont-text' }, h('span', { class: 'vp-cont-name' }, pos.name || baseOf(p)),
             h('span', { class: 'vp-cont-bar' }, h('i', { style: { width: `${(100 * pos.t) / pos.d}%` } })),
             h('span', { class: 'muted small' }, `${fmtClock(pos.t)} of ${fmtClock(pos.d)}`))))) : null));
   }
 
   showVol();
   if (args.path) open(args.path, args.siblings);
+  else if (args.src) openSrc(args);
   else if (args.restore?.path) open(args.restore.path, args.restore.siblings);
+  else if (args.restore?.src) openSrc(args.restore);
   else showEmpty();
 
   return {
-    onArgs(a) { if (a.path) open(a.path, a.siblings); },
+    onArgs(a) { if (a.path) open(a.path, a.siblings); else if (a.src) openSrc(a); },
     onFocus() { stage.focus({ preventScroll: true }); },
-    saveState: () => (item && !item.local ? { path: item.path, siblings: siblings.length <= 200 ? siblings : [item.path] } : {}),
+    saveState: () => (!item || item.local ? {}
+      : item.src ? { src: item.src, name: item.name, key: item.key, poster: item.poster, meta: item.meta }
+        : { path: item.path, siblings: siblings.length <= 200 ? siblings : [item.path] }),
     onDestroy() {
       savePosition();
       clearInterval(saveTimer);

@@ -4,7 +4,8 @@
 
 **Your own server, as a desktop in the browser.** ultraspace is a single Go binary that turns a
 small Linux VPS into a personal web desktop: files, system monitor, music player, a real web
-browser, a terminal and VS Code — all in windows you can drag, snap and resize, from any device.
+browser, a terminal, VS Code, a torrent client and a Stremio-compatible media centre — all in windows
+you can drag, snap and resize, from any device.
 
 Sign in on your laptop, close the lid, open your phone: the same windows, tabs, terminal sessions,
 song and position are waiting for you.
@@ -21,10 +22,10 @@ song and position are waiting for you.
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- **One binary**, no runtime dependencies, no build step for the frontend. ~13 MB on disk, ~13 MB of RAM idle.
+- **One binary**, no runtime dependencies, no build step for the frontend. ~27 MB on disk, ~15 MB of RAM idle.
 - **Desktop UI**: lock screen, menu bar with live stats, dock, widgets, Ctrl+K launcher, light/dark themes, wallpapers.
 - **Follows you everywhere**: the workspace is saved on the server and restored on any device.
-- **Heavy parts start on demand**: Chrome and VS Code run only while you use them and stop when idle.
+- **Heavy parts start on demand**: Chrome, VS Code and the torrent engine run only while needed and stop when idle.
 - **Security first**: setup token, hashed sliding sessions, CSRF and origin checks, strict CSP, systemd sandboxing,
   and an egress filter on the remote browser.
 
@@ -182,6 +183,46 @@ file:
 - One conversion runs at a time per user; seeking or opening another file stops the previous one. Files are read
   through a descriptor opened inside the library, so symlinks cannot lead ffmpeg elsewhere.
 
+### Torrents
+
+A BitTorrent client on the server ([anacrolix/torrent](https://github.com/anacrolix/torrent), built in).
+
+- Add magnet links (paste one anywhere in the window), `.torrent` files from this device (button or drag and
+  drop) or from Files (opening a `.torrent` in Files sends it here).
+- Downloads land in **Files → Torrents**. Progress, speeds, peers, time left and ratio; pause, resume, remove
+  (keeping or deleting the files); choose which files of a torrent to download.
+- **Play while downloading**: the play button opens a video in Videos straight away. The pieces being watched
+  are fetched first, seeking jumps ahead, and subtitles inside the torrent are offered.
+- The engine starts when there is something to do and stops two minutes after the last torrent finishes or
+  pauses. Finished torrents seed until a ratio of 1.0 (`seed_ratio`), then stop.
+- Trackers, web seeds and peers are limited to public addresses, like the server browser.
+- **Web downloads** (from Stremio's download button) are listed here too; they go to **Files → Downloads**.
+
+### Stremio
+
+A media centre that speaks the open [Stremio addon protocol](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/protocol.md).
+
+- **Home** with continue watching and rows from every catalog; **Films / Series** (and any other type an
+  addon offers) with catalog and genre filters; **Search**; a **Library** of saved titles.
+- Title pages with backdrop, logo, rating, cast, trailer, and seasons with episodes for series.
+- **Streams** from the addons you install, grouped by addon. Pick one and it plays in Videos: web streams through
+  the server, torrents while they download (only the file you watch is fetched). Subtitles come from the
+  OpenSubtitles addon, your browser's languages first.
+- **Download to the server**: the download button on a stream saves it in Files — a torrent stream becomes a
+  download of just that file (one episode, not the whole season pack), a web stream goes to Files → Downloads.
+- **Stremio account sync**: sign in once (Addons → Sign in) and ultraspace stays signed in, like the official
+  apps. Your **addons** are your account's collection (installing or removing one here changes it in Stremio
+  too), the heart adds to your **library**, and **watch progress** is written to the account, so continue
+  watching works across ultraspace, your phone and your TV. Titles watched elsewhere appear in continue
+  watching and open on the right episode.
+- **Addons**: Cinemeta (catalogs and details) and OpenSubtitles are installed to start. Add others by address
+  (`https://…/manifest.json` or `stremio://…`) or paste several links at once. Signed out, addons and the
+  library are kept on the server and follow you to every device.
+- The server relays addon requests: only to installed addons, only the protocol's resources (catalog, meta,
+  stream, subtitles), only JSON, only to public addresses. Posters go through a public-only image relay.
+
+ultraspace ships no stream addons. Only install addons you trust and only watch what you have the right to.
+
 ### Notes
 
 - Markdown notes kept as ordinary `.md` files in **Files → Notes**, so they can also be opened, backed up or edited
@@ -301,6 +342,21 @@ ultraspace is built for one person (or a few trusted people) exposing a personal
   without sudo.
 - SSH access is not touched: key-only SSH keeps working exactly as before.
 
+**Torrents and Stremio**
+- The torrent engine never connects to loopback, private, link-local or other non-public addresses: peers are
+  filtered by an IP block list, HTTP trackers and web seeds use the public-only dialer, and UDP tracker packets
+  to such addresses are dropped. A crafted magnet link cannot reach the host, the LAN or the metadata service.
+- Torrent files are written by the engine under Files → Torrents; names from the torrent cannot climb out of it,
+  and "remove and delete files" only removes inside that folder.
+- Streams and subtitle files reach ffmpeg through a loopback-only server under random, short-lived tokens, so
+  ffmpeg itself never opens network addresses. In the browser they are served with a sandboxing CSP and only
+  as media types.
+- Addon requests, posters, web streams and web downloads all use the public-only dialer.
+- Signing in to Stremio stores only the account's session key, in a server-side record that the state API
+  cannot read or write (like Navidrome's token); the password is sent to Stremio once and never kept.
+  "Sign out" ends the session at Stremio and deletes the record. Protected addons (Cinemeta) and the desktop
+  app's local-files addon are never removed from the account.
+
 **Navidrome**
 - Only a salted Subsonic token is stored, server-side, in a record the state API does not expose. The browser
   cannot supply its own credentials, and only an allow-list of listening, favourite and playlist calls is relayed.
@@ -321,6 +377,7 @@ and cgroup protection, address-family restrictions, and memory limits so Chrome 
   - [chrome-headless-shell](https://googlechromelabs.github.io/chrome-for-testing/) for the server browser
     (~270 MB on disk).
   - [code-server](https://github.com/coder/code-server/releases) for VS Code (~700 MB on disk).
+  - `ffmpeg` for the video player (also used for torrents and Stremio streams).
 
 ---
 
@@ -454,7 +511,15 @@ chrome     = "/opt/ultraspace/chrome/chrome-headless-shell"   # missing = light 
 idle       = "0"       # stop Chrome after this long with no window connected (0 = from memory_profile)
 quality    = 70        # JPEG quality of the streamed screen
 no_sandbox = false     # only for hosts where Chrome's sandbox cannot run
+
+[torrent]
+disabled   = false        # turn the torrent client off (Torrents and Stremio torrent streams)
+folder     = "Torrents"   # inside files_root
+port       = 42069        # incoming peers; open it (TCP and UDP) in the firewall for faster downloads; 0 = random
+seed_ratio = 1.0          # stop seeding at this upload/size ratio; 0 = never seed, -1 = forever
 ```
+
+Torrents download without the port being open; opening it lets more peers connect.
 
 Command-line flags: `-config`, `-listen`, `-data`, `-debug`, `-version`.
 
@@ -509,6 +574,7 @@ Measured (PSS, which counts shared memory once):
 | Chrome, blank | ~150 MB | while a Browser window is connected |
 | Chrome, one live page | + the page: ~60 MB (Wikipedia) to ~300 MB (YouTube, news sites) | |
 | code-server (VS Code) | ~360 MB with a small project open (was ~500 MB before tuning) | while in use |
+| torrent engine | ~20–60 MB, plus the page cache for data being read | while a torrent is active or playing |
 
 Tuning built in:
 - Chrome: no software GPU rasterizer (~130 MB less), no back-forward cache, capped renderer processes, smaller
@@ -545,6 +611,10 @@ internal/
   agent/                 agent server (PTY sessions, code-server) and the authenticated proxy to it
   navidrome/             Subsonic relay with server-side credentials
   clip/                  shared clipboard and the live event stream
+  torrent/               BitTorrent engine (anacrolix/torrent), list, play-while-downloading source
+  mediasrc/              media sources for the player (torrent files, web streams) and the ffmpeg loopback
+  stremio/               Stremio addon relay, image relay, account sync (addons, library, progress)
+  webdl/                 web downloads into Files → Downloads
   config/  httpx/        config loading, HTTP helpers
 web/static/
   index.html style.css   shell and all styles
@@ -600,6 +670,11 @@ All endpoints except setup, login, logout and health need a session cookie. Non-
 | Photos | `GET /api/files/photos`, `GET /api/files/thumb?path=&size=256\|512` (images and videos) |
 | Videos | `GET /api/files/probe`, `GET /api/files/stream?path=&t=&audio=&mode=&h=`, `GET /api/files/subtitle` |
 | Clipboard | `GET/POST/DELETE /api/clipboard`, `DELETE /api/clipboard/{id}`, `GET /api/events` (Server-Sent Events) |
+| Torrents | `GET/POST /api/torrents`, `GET /api/torrents/{hash}`, `POST /api/torrents/{hash}/{pause,resume,remove,delete}`, `PUT /api/torrents/{hash}/files` |
+| Media sources | `GET /api/media/raw?src=` (`torrent:<hash>:<file>` or `url:<address>`); probe, stream and subtitle accept `src=` instead of `path=` |
+| Stremio | `GET /api/stremio/defaults`, `POST /api/stremio/manifest`, `GET /api/stremio/addon`, `GET /api/stremio/img` |
+| Stremio account | `GET /api/stremio/account`, `POST /api/stremio/account/{login,logout}`, `GET/PUT /api/stremio/account/addons`, `GET/POST /api/stremio/account/library` |
+| Web downloads | `GET/POST /api/downloads`, `POST /api/downloads/{id}/{cancel,forget}` |
 | Health | `GET /api/health` |
 
 ---
@@ -614,6 +689,8 @@ All endpoints except setup, login, logout and health need a session cookie. Non-
 - **Terminal and VS Code** see the agent user's home directory, not the Files library (which belongs to the
   `ultraspace` user).
 - One Chrome and one code-server per server; built for personal use, not many concurrent users.
+- **Web downloads** are kept in memory: one in progress when ultraspace restarts has to be started again.
+- **Torrent streams** start as fast as the swarm allows; a file with few peers can take a while to begin.
 
 ---
 
@@ -624,6 +701,9 @@ All endpoints except setup, login, logout and health need a session cookie. Non-
 - [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/) — `chrome-headless-shell`
   (installed separately).
 - [Navidrome](https://www.navidrome.org) — the music server the Music app can connect to.
+- [anacrolix/torrent](https://github.com/anacrolix/torrent) (MPL-2.0) — the BitTorrent engine.
+- The [Stremio addon protocol](https://github.com/Stremio/stremio-addon-sdk) and its Cinemeta and OpenSubtitles
+  addons. ultraspace is not affiliated with Stremio.
 - Go libraries: [modernc.org/sqlite](https://gitlab.com/cznic/sqlite), [coder/websocket](https://github.com/coder/websocket),
   [creack/pty](https://github.com/creack/pty), [BurntSushi/toml](https://github.com/BurntSushi/toml),
   [golang.org/x/crypto](https://pkg.go.dev/golang.org/x/crypto).

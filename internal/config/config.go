@@ -28,7 +28,21 @@ type Config struct {
 	// (512 MB hosts), "small" (about 1 GB) or "normal".
 	MemoryProfile string `toml:"memory_profile"`
 	// AgentSocket is where the Terminal and VS Code service (ultraspace agent) listens.
-	AgentSocket string `toml:"agent_socket"`
+	AgentSocket string  `toml:"agent_socket"`
+	Torrent     Torrent `toml:"torrent"`
+}
+
+// Torrent configures the BitTorrent client behind the Torrents and Stremio apps.
+type Torrent struct {
+	// Disabled turns the torrent client off (the apps then say so).
+	Disabled bool `toml:"disabled"`
+	// Folder is where downloads go, relative to files_root (default "Torrents").
+	Folder string `toml:"folder"`
+	// Port is the incoming peer port (open it in the firewall for better speeds); 0 = random.
+	Port int `toml:"port"`
+	// SeedRatio stops uploading a finished torrent at this upload/size ratio.
+	// 0 = do not seed at all, -1 = seed for as long as ultraspace runs.
+	SeedRatio float64 `toml:"seed_ratio"`
 }
 
 // Browser configures the remote Chrome behind the Browser app.
@@ -66,6 +80,7 @@ func Default() Config {
 			Chrome:  "/opt/ultraspace/chrome/chrome-headless-shell",
 			Quality: 70,
 		},
+		Torrent: Torrent{Folder: "Torrents", Port: 42069, SeedRatio: 1},
 	}
 }
 
@@ -91,6 +106,12 @@ func (c *Config) Finalize() error {
 	}
 	if c.SessionTTL.Duration < time.Minute {
 		return errors.New("session_ttl must be at least 1m")
+	}
+	if c.Torrent.Folder == "" || !filepath.IsLocal(c.Torrent.Folder) {
+		return errors.New("torrent.folder must be a folder inside files_root")
+	}
+	if c.Torrent.Port < 0 || c.Torrent.Port > 65535 {
+		return errors.New("torrent.port must be 0-65535")
 	}
 	return nil
 }
