@@ -51,14 +51,22 @@ song and position are waiting for you.
 ### Desktop
 
 - **Lock screen** with clock; first run asks for a one-time setup token from the server.
-- **Menu bar**: focused app, now playing, CPU / memory / network, search, account, clock.
-- **Dock** with running indicators; **widgets** for the clock, system rings and a live network graph.
+- **Menu bar**: focused app, now playing, CPU / memory / network, shared clipboard, search, account, clock.
+- **Dock** with running indicators; it scrolls sideways (swipe, or mouse wheel) when the apps do not fit, with a
+  fade on the side that has more. **Widgets** for the clock, system rings and a live network graph.
 - **Windows**: drag, resize from any edge, double-click to maximize, drag to the top or sides to snap, minimize to the dock.
-  Each app remembers its size and position.
+  Each app remembers its size and position. Minimise, maximise and close sit on the right, Windows style; Settings →
+  Appearance → *Window buttons* switches to macOS-style buttons on the left.
 - **Launcher (Ctrl+K)**: apps, files anywhere in your library, and web addresses or searches for the Browser.
 - **Appearance**: light, dark or auto theme, 10 accent colours, 8 built-in wallpapers or any image from Files,
   frosted-glass effects (can be turned off on slow devices).
-- **Phones**: windows go full screen, sidebars collapse, touch-friendly controls.
+- **Phones** (screens under 760 px; the desktop layout is untouched):
+  - windows go full screen, and a ☰ button in the title bar slides an app's sidebar in as a drawer (Files places,
+    System tabs, Music and Navidrome, the Notes list, Settings sections, Photo folders);
+  - menus open as a sheet from the bottom, notifications appear above the dock, rows and buttons are sized for
+    fingers, and text fields are 16 px so iPhones do not zoom;
+  - a long press opens context menus (on iPhone and iPad too, which have no right-click event);
+  - the Terminal adds a row of Esc / Tab / Ctrl / arrow keys, and the server Browser lays pages out for a phone.
 
 ### Files
 
@@ -507,7 +515,10 @@ web/static/
   index.html style.css   shell and all styles
   js/core.js             DOM helper, API client, menus, dialogs, settings, formatting
   js/wm.js               window manager
-  js/desktop.js          menu bar, dock, widgets, launcher
+  js/desktop.js          menu bar, dock, widgets, launcher, desktop drop-to-upload
+  js/clipboard.js        shared clipboard panel and the live event stream
+  js/markdown.js         safe Markdown renderer for Notes
+  js/pick.js             picker for files in the library
   js/session.js          workspace sync across devices
   js/apps/*.js           one module per app
   vendor/xterm/          xterm.js (MIT)
