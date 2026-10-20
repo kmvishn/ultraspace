@@ -1,0 +1,12 @@
+# /etc/apparmor.d/ultraspace-chrome
+# Ubuntu 23.10+ blocks unprivileged user namespaces unless a profile allows them.
+# This lets the remote browser's Chrome build its sandbox, like the profile Ubuntu
+# ships for Google Chrome itself.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile ultraspace-chrome /opt/ultraspace/chrome/chrome-headless-shell flags=(unconfined) {
+  userns,
+
+  include if exists <local/ultraspace-chrome>
+}
