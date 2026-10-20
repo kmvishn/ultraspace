@@ -68,6 +68,9 @@ A file manager confined to one folder on the server.
 - Multi-select (Ctrl / Shift), right-click menus, keyboard shortcuts (Delete, F2, Enter, Backspace, Ctrl+A).
 - Drag files onto folders to move them; drop files from your computer to upload (with progress and speed).
 - Search across the whole library; *Set as wallpaper* for images; *Play in Music* for audio.
+- **Between this computer and the server**: drop files onto a Files window (or the empty desktop) to upload, paste
+  files with Ctrl+V into the open folder, and drag a file out of Files onto your computer's desktop to download it
+  (Chrome and Edge). Music and Notes accept dropped audio and `.md`/`.txt` files too.
 - Opens images and videos in the **Viewer**, audio in **Music**, text and code in the **Text Editor**.
 
 ### System
@@ -105,7 +108,10 @@ Two engines, switchable from the ⋯ menu:
   copy are sent back.
   - Every site works (GitHub, YouTube, sign-in pages…), because it is a real browser.
   - Cookies, logins, tabs and history live on the server, so they follow you to every device.
-  - Downloads land in **Files → Downloads**.
+  - Downloads land in **Files → Downloads**, with a *Save to this device* button when they finish.
+  - **Files into web pages**: a site's "Choose file" button asks whether to send a file from this device or from
+    Files; you can also drag files from your computer onto the page, or paste (Ctrl+V) an image or file into it,
+    for example into a mail or chat page. Files are staged on the server under random ids for six hours.
   - Pop-ups open as new tabs; page dialogs (alert, confirm, prompt, leave-page) appear as desktop dialogs.
   - Chrome starts when a Browser window connects and stops after a few idle minutes; a background tab stops
     streaming after a minute. Tabs are saved and reopened on the next start.
@@ -524,7 +530,7 @@ search, settings, workspace sync and conflicts, device sign-out, database migrat
 the public-address rules, terminal session replay, the Navidrome relay, static caching and compression,
 cover search, VS Code settings merging, photo dates/orientation/thumbnails, the shared clipboard and its live
 events, the sound stream's MP4 splitting (with ffmpeg installed), and (with `ULTRASPACE_TEST_CHROME` set) sleeping and restoring tabs
-in a real Chrome.
+in a real Chrome, plus file choosers, drag-and-drop and pasted files reaching a page.
 
 ---
 
@@ -540,7 +546,7 @@ All endpoints except setup, login, logout and health need a session cookie. Non-
 | Files | `GET /api/files/list`, `GET /api/files/download`, `GET /api/files/search`, `POST /api/files/{upload,mkdir,rename,delete,write}` |
 | System | `GET /api/system`, `GET /api/system/history`, `GET /api/system/processes`, `GET /api/services`, `GET /api/logs` |
 | Sync | `GET/PUT /api/state/{workspace,browser}` |
-| Browser | `GET /api/browser/probe`, `GET /api/remote/status`, `GET /api/remote/ws` (WebSocket), `POST /api/remote/stop` |
+| Browser | `GET /api/browser/probe`, `GET /api/remote/status`, `GET /api/remote/ws` (WebSocket), `POST /api/remote/stop`, `POST /api/remote/{upload,import}` |
 | Terminal | `GET /api/agent/status`, `GET/POST /api/term/sessions`, `DELETE /api/term/sessions/{id}`, `GET /api/term/sessions/{id}/ws` (WebSocket) |
 | VS Code | `/code/…` (proxied code-server) |
 | Navidrome | `GET /api/navidrome`, `POST /api/navidrome/{connect,disconnect}`, `GET /api/navidrome/rest/{method}` |
@@ -553,8 +559,7 @@ All endpoints except setup, login, logout and health need a session cookie. Non-
 ## Limitations
 
 - **Server browser**: streamed images, so scrolling and video are choppier than a local browser (roughly
-  10–15 fps), and sound runs slightly behind the picture. File uploads from web pages are not supported yet. Some sites may still
-  detect an automated browser.
+  10–15 fps), and sound runs slightly behind the picture. Some sites may still detect an automated browser.
 - **Light mode** cannot follow navigation inside a page, and site logins stay on that device.
 - **Music** reads album and artist from folder and file names, not from tags, for files in Files.
 - **System** is read-only: no starting or stopping services from the web.

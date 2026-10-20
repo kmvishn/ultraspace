@@ -969,3 +969,20 @@ kbd { font-family: var(--font); font-size: 11px; padding: 2px 6px; border-radius
 .photo-badge { position: absolute; right: 6px; bottom: 6px; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: rgba(0, 0, 0, .55); }
 .photos-sentinel { height: 1px; }
 @media (max-width: 760px) { .photos-content { padding: 4px 6px 20px; --tile: 96px !important; } .photos-grid { gap: 2px; } }
+
+.rb-stage.dropping::after { content: "Drop to send to the page"; position: absolute; inset: 10px; z-index: 3; border: 2px dashed var(--accent); border-radius: var(--r-md); background: color-mix(in srgb, var(--accent) 18%, transparent); display: grid; place-items: center; font-weight: 650; color: #fff; text-shadow: 0 1px 4px rgba(0, 0, 0, .5); pointer-events: none; }
+
+/* file picker */
+.pick { display: flex; flex-direction: column; gap: 8px; }
+.pick-crumbs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.pick-list { height: min(46vh, 360px); overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; padding: 4px; background: var(--field); }
+.pick-row { width: 100%; display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 7px; text-align: left; }
+.pick-row:hover { background: var(--hover); }
+.pick-row.selected { background: var(--accent); color: #fff; }
+.pick-icon { display: grid; place-items: center; color: var(--text-2); }
+.pick-row.selected .pick-icon { color: #fff; }
+.pick-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-size { font-size: 12px; color: var(--muted); }
+.pick-row.selected .pick-size { color: rgba(255, 255, 255, .8); }
+.desktop.dropping::after { content: "Drop to upload to Files"; position: fixed; inset: 48px 16px 100px; z-index: 5; border: 2px dashed rgba(255, 255, 255, .7); border-radius: 18px; background: rgba(0, 0, 0, .25); display: grid; place-items: center; font-size: 18px; font-weight: 650; color: #fff; pointer-events: none; }
+.win-body.dropping { outline: 2px dashed var(--accent); outline-offset: -6px; }

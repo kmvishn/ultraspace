@@ -1,6 +1,6 @@
 // Music: plays audio from Files (folders become albums) and from a connected Navidrome
 // server, through one player. The queue and position follow you between devices.
-import { h, icon, api, report, toast, emit, fmtClock, fmtBytes, fmtDuration, extOf, dirOf, baseOf, fileUrl, debounce } from '../core.js';
+import { h, icon, api, report, toast, emit, fmtClock, fmtBytes, fmtDuration, extOf, dirOf, baseOf, fileUrl, debounce, uploadWithProgress } from '../core.js';
 import { registerApp } from '../wm.js';
 import { nd } from './music-navidrome.js';
 
@@ -661,6 +661,23 @@ function mountMusic(win, args) {
     navigator.mediaSession.setActionHandler('nexttrack', () => next(true));
     navigator.mediaSession.setActionHandler('previoustrack', () => prev());
   }
+
+  // Drop audio files (and a cover image) on the window to add them under Files → Music.
+  const AUDIO = ['mp3', 'flac', 'ogg', 'oga', 'opus', 'wav', 'm4a', 'aac'];
+  win.body.addEventListener('dragover', (e) => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); win.body.classList.add('dropping'); } });
+  win.body.addEventListener('dragleave', (e) => { if (!win.body.contains(e.relatedTarget)) win.body.classList.remove('dropping'); });
+  win.body.addEventListener('drop', async (e) => {
+    win.body.classList.remove('dropping');
+    const files = [...(e.dataTransfer?.files || [])].filter((f) => AUDIO.includes(extOf(f.name)) || /^image\//.test(f.type));
+    if (!files.length) return;
+    e.preventDefault();
+    await api('POST', '/api/files/mkdir', { path: '/Music' }).catch(() => {});
+    let n = 0;
+    for (const f of files) {
+      try { await uploadWithProgress(`/api/files/upload?path=${encodeURIComponent('/Music')}`, f); n++; } catch (err) { report(err); }
+    }
+    if (n) { toast(`Added ${n} file${n === 1 ? '' : 's'} to Files → Music`); loadLibrary(); }
+  });
 
   updateModes();
   updateVol();

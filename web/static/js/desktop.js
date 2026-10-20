@@ -1,7 +1,7 @@
 // The desktop shell: wallpaper, menu bar, dock, widgets and the Ctrl+K launcher.
 import {
   h, icon, api, on, emit, menu, closeMenu, settings, system, fmtBytes, fmtDuration, debounce, drawChart,
-  kindOf, KIND_ICON, dirOf, fileUrl, report,
+  kindOf, KIND_ICON, dirOf, fileUrl, report, notice, uploadWithProgress,
 } from './core.js';
 import { initWM, allApps, openApp, openFile, windowsOf, focusedWindow, closeAllWindows } from './wm.js';
 import { stopSession } from './session.js';
@@ -68,6 +68,32 @@ export function buildDesktop(user, { onSignOut }) {
       '-',
       { label: 'Change wallpaper…', icon: 'wallpaper', action: () => openApp('settings', { section: 'appearance' }) },
     ]);
+  });
+
+  // Files dropped on the empty desktop (not on a window) upload to the top of Files.
+  const outsideWindows = (e) => !e.target.closest('.win, .dock-wrap, .menubar');
+  root.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer?.types.includes('Files') || !outsideWindows(e)) { root.classList.remove('dropping'); return; }
+    e.preventDefault();
+    root.classList.add('dropping');
+  });
+  root.addEventListener('dragleave', (e) => { if (!e.relatedTarget || !root.contains(e.relatedTarget)) root.classList.remove('dropping'); });
+  root.addEventListener('drop', async (e) => {
+    root.classList.remove('dropping');
+    if (!outsideWindows(e) || !e.dataTransfer?.files.length) return;
+    e.preventDefault();
+    const files = [...e.dataTransfer.files];
+    let ok = 0;
+    for (const f of files) {
+      try { await uploadWithProgress(`/api/files/upload?path=${encodeURIComponent('/')}`, f); ok++; } catch (err) { report(err); }
+    }
+    if (ok) {
+      const close = notice(`Uploaded ${ok === 1 ? files[0].name : `${ok} files`} to Files`, [
+        { label: 'Dismiss', run: () => {} },
+        { label: 'Show in Files', primary: true, run: () => openApp('files', { path: '/' }) },
+      ], 'upload');
+      setTimeout(close, 10000);
+    }
   });
 
   const onKey = (e) => {
