@@ -433,7 +433,21 @@ On Ubuntu 23.10+ Chrome's sandbox needs the AppArmor profile from `deploy/`; for
 
 ## Home lab / local network
 
-No domain, no proxy, no cloud. On the machine (Debian, Ubuntu, Raspberry Pi OS 64-bit, Fedora…):
+No domain, no proxy, no cloud. On the machine (Debian, Ubuntu, Raspberry Pi OS 64-bit, Fedora…), take the
+release for its architecture from [Releases](https://github.com/kmvishn/ultraspace/releases)
+(`linux-amd64` for PCs and most servers, `linux-arm64` for a Raspberry Pi 4/5):
+
+```sh
+curl -LO https://github.com/kmvishn/ultraspace/releases/latest/download/ultraspace-linux-amd64.tar.gz
+tar xzf ultraspace-linux-amd64.tar.gz && cd ultraspace-linux-amd64
+sudo ./install.sh --lan    # prints the setup token and the address to open
+```
+
+`install.sh` installs the binary, creates the `ultraspace` user, writes `/etc/ultraspace/config.toml` (only if
+there is none) and starts the systemd service. Without `--lan` it listens on 127.0.0.1 for a reverse proxy.
+Run a newer release's `install.sh` the same way to update; your config and data are kept.
+
+Or by hand, from source:
 
 ```sh
 make build                 # or: make build-arm64 for a Raspberry Pi
@@ -536,6 +550,8 @@ sudo systemctl enable --now ultraspace-agent.socket
 The agent is socket-activated: it starts on the first Terminal or VS Code request.
 
 ### 6. Updating
+
+Either unpack a newer release on the server and run `sudo ./install.sh`, or from your own machine:
 
 ```sh
 make deploy HOST=user@server SSH_KEY=~/.ssh/id_ed25519
