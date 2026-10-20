@@ -216,7 +216,7 @@ file:
 - **Text Editor**: Ctrl+S to save, tab key, word wrap, line/column, unsaved-changes guard. Unsaved text travels
   with your session to other devices.
 - **Viewer**: images and videos with arrow-key navigation through the folder, *Set as wallpaper*, download.
-- **Settings**: appearance, account (change password — signs out other devices), **Devices** (every signed-in
+- **Settings**: appearance, account (change password — signs out other devices — and the optional pattern lock), **Devices** (every signed-in
   browser with IP and last activity; sign out any or all others), and About.
 
 ---
@@ -269,6 +269,12 @@ ultraspace is built for one person (or a few trusted people) exposing a personal
 - Session cookies are random 256-bit tokens, stored only as SHA-256 hashes; `HttpOnly`, `SameSite=Strict`,
   `Secure` behind HTTPS. Sessions slide: they expire after `session_ttl` of *inactivity* (default 30 days).
 - Changing the password signs out every other device; Settings → Devices can sign out any single device.
+- **Optional pattern lock** (Settings → Account): a 3×3 pattern drawn after the password, Android style. With it
+  on, a correct password only earns a two-minute ticket bound to the same IP; the session is created once the
+  pattern matches. Five wrong patterns void the ticket (and count towards the IP rate limit), the pattern is
+  stored as a bcrypt hash, and setting, changing or removing it needs the password. A pattern is a second secret,
+  not a second device, so it protects against a leaked password rather than a stolen phone. Forgotten pattern:
+  `sudo -u ultraspace ultraspace reset-pattern -user NAME` on the server.
 
 **Requests**
 - State-changing requests need a custom header (`X-Ultraspace: 1`), a matching `Origin`, and are refused when
@@ -452,6 +458,9 @@ no_sandbox = false     # only for hosts where Chrome's sandbox cannot run
 
 Command-line flags: `-config`, `-listen`, `-data`, `-debug`, `-version`.
 
+`ultraspace reset-pattern -user NAME [-config FILE]` turns off a forgotten pattern lock (run it as the service
+user: `sudo -u ultraspace ultraspace reset-pattern -user NAME`).
+
 Agent flags (`ultraspace agent`): `-socket` (when not socket-activated), `-code-server` (binary path),
 `-code-idle` (default from the memory profile), `-memory-profile`, `-debug`.
 
@@ -562,7 +571,7 @@ The frontend has no build step: edit files under `web/static`, rebuild the binar
 Apps register themselves with `registerApp({ id, name, icon, color, mount })`; `mount(win, args)` returns hooks
 such as `onArgs`, `onFocus`, `onResize`, `onClose`, `onDestroy` and `saveState` (for workspace sync).
 
-Tests cover setup and login, rate limiting, CSRF, file-root escapes (`..` and symlinks), uploads and writes,
+Tests cover setup and login, the pattern lock (tickets, tries, removal), rate limiting, CSRF, file-root escapes (`..` and symlinks), uploads and writes,
 search, settings, workspace sync and conflicts, device sign-out, database migration, the browser egress proxy,
 the public-address rules, terminal session replay, the Navidrome relay, static caching and compression,
 cover search, VS Code settings merging, photo dates/orientation/thumbnails, the video player's direct/repackage/convert decisions, streams, subtitles and
@@ -579,8 +588,8 @@ All endpoints except setup, login, logout and health need a session cookie. Non-
 
 | Area | Endpoints |
 | --- | --- |
-| Auth | `GET/POST /api/setup`, `POST /api/login`, `POST /api/logout`, `GET /api/me` |
-| Account | `POST /api/account/password`, `GET/PUT /api/account/settings`, `GET /api/account/sessions`, `POST /api/account/sessions/revoke` |
+| Auth | `GET/POST /api/setup`, `POST /api/login`, `POST /api/login/pattern`, `POST /api/logout`, `GET /api/me` |
+| Account | `POST /api/account/password`, `POST /api/account/pattern`, `GET/PUT /api/account/settings`, `GET /api/account/sessions`, `POST /api/account/sessions/revoke` |
 | Files | `GET /api/files/list`, `GET /api/files/download`, `GET /api/files/search`, `POST /api/files/{upload,mkdir,rename,delete,write}` |
 | System | `GET /api/system`, `GET /api/system/history`, `GET /api/system/processes`, `GET /api/services`, `GET /api/logs` |
 | Sync | `GET/PUT /api/state/{workspace,browser}` |

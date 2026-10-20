@@ -1102,3 +1102,31 @@ kbd { font-family: var(--font); font-size: 11px; padding: 2px 6px; border-radius
   .vp-controls { padding: 22px 6px 6px; }
   .vp-btn { width: 34px; height: 34px; }
 }
+
+/* ---------- pattern lock ---------- */
+
+.pp { width: min(260px, 72vw); aspect-ratio: 1; margin: 6px auto; touch-action: none; user-select: none; -webkit-user-select: none; }
+.pp-svg { width: 100%; height: 100%; display: block; cursor: pointer; }
+.pp-dot { fill: currentColor; opacity: .55; transition: opacity .15s, r .15s; }
+.pp-halo { fill: var(--accent); opacity: 0; transition: opacity .15s; }
+.pp g.on .pp-dot { opacity: 1; fill: var(--accent); }
+.pp g.on .pp-halo { opacity: .22; }
+.pp-line { fill: none; stroke: var(--accent); stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; opacity: .85; }
+.pp-line.live { opacity: .5; }
+.pp.error .pp-line, .pp.error g.on .pp-dot { stroke: var(--danger); fill: var(--danger); }
+.pp.error .pp-line { fill: none; }
+.pp.error g.on .pp-halo { fill: var(--danger); }
+.pp.error { animation: shake .35s; }
+.pp.ok .pp-line { stroke: var(--ok); }
+.pp.ok g.on .pp-dot { fill: var(--ok); }
+.pp.ok g.on .pp-halo { fill: var(--ok); }
+.lock-pattern { align-items: center; text-align: center; }
+.lock-pattern .pp { color: var(--text); }
+.lock-back { justify-content: center; margin-top: 2px; }
+.avatar.big { width: 64px; height: 64px; font-size: 26px; }
+.pattern-setup { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.pattern-setup .pp { color: var(--text); }
+.pattern-setup .input { margin-top: 6px; }
+.pattern-msg { text-align: center; min-height: 2.6em; }
+.pattern-row { cursor: default; flex-wrap: wrap; }
+.pattern-row .set-desc { overflow-wrap: anywhere; }

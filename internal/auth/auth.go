@@ -61,6 +61,7 @@ type Auth struct {
 	limiter   *limiter
 	dummyHash []byte
 	setupMu   sync.Mutex
+	tickets   tickets // sign-ins waiting for the pattern
 }
 
 func New(st *store.Store, opts Options) (*Auth, error) {
@@ -110,6 +111,7 @@ func (a *Auth) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/account/settings", a.Require(http.HandlerFunc(a.handleGetSettings)))
 	mux.Handle("PUT /api/account/settings", a.Require(http.HandlerFunc(a.handlePutSettings)))
 	mux.Handle("GET /api/account/sessions", a.Require(http.HandlerFunc(a.handleSessions)))
+	a.registerPattern(mux)
 	mux.Handle("POST /api/account/sessions/revoke", a.Require(http.HandlerFunc(a.handleRevoke)))
 }
 
@@ -343,6 +345,9 @@ func (a *Auth) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.limiter.reset(ip)
+	if a.needsPattern(w, r, u) {
+		return // the session comes after the pattern
+	}
 	if !a.startSession(w, r, u) {
 		return
 	}
@@ -455,7 +460,7 @@ func validateCredentials(username, password string) string {
 }
 
 func userJSON(u store.User) map[string]any {
-	return map[string]any{"id": u.ID, "username": u.Username}
+	return map[string]any{"id": u.ID, "username": u.Username, "pattern": u.PatternHash != ""}
 }
 
 func randomToken(n int) string {
