@@ -956,6 +956,9 @@ kbd { font-family: var(--font); font-size: 11px; padding: 2px 6px; border-radius
   .notes-editor[data-mode="split"] { grid-template-columns: 1fr; }
   .notes-editor[data-mode="split"] .notes-preview { display: none; }
   .notes-tools { display: none; }
+  .notes-main .toolbar { flex-wrap: nowrap; }
+  .notes-title { min-width: 0; flex: 1 1 auto; }
+  .notes-status { display: none; }
 }
 
 /* ---------- Photos ---------- */
@@ -1022,3 +1025,21 @@ kbd { font-family: var(--font); font-size: 11px; padding: 2px 6px; border-radius
   .dock { max-width: 100%; gap: 4px; padding: 7px 8px 8px; }
 }
 @keyframes slideup { from { transform: translateY(16px); opacity: 0; } }
+
+/* ---------- window buttons on the right (Windows style; the default) ---------- */
+
+[data-buttons="right"] .lights { order: 3; gap: 0; margin-right: -12px; align-self: stretch; }
+[data-buttons="right"] .light {
+  width: 46px; height: auto; border-radius: 0; background: transparent !important; color: var(--text-2) !important;
+  transition: background .12s, color .12s;
+}
+[data-buttons="right"] .light .i { width: 14px; height: 14px; stroke-width: 1.75; }
+[data-buttons="right"] .light.min { order: 1; }
+[data-buttons="right"] .light.max { order: 2; }
+[data-buttons="right"] .light.close { order: 3; border-top-right-radius: 13px; }
+[data-buttons="right"] .win.maximized .light.close { border-radius: 0; }
+[data-buttons="right"] .light:hover { background: var(--hover) !important; color: var(--text) !important; }
+[data-buttons="right"] .light.close:hover { background: #e81123 !important; color: #fff !important; }
+[data-buttons="right"] .win:not(.focused) .light { color: var(--muted) !important; }
+[data-buttons="right"] .win-title { text-align: left; padding: 0 4px; }
+[data-buttons="right"] .win-actions { margin-left: 0; }
