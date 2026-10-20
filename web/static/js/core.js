@@ -135,6 +135,11 @@ export const baseOf = (p) => p.replace(/^.*\//, '');
 export const fileUrl = (p, inline = false, extra = '') =>
   `/api/files/download?path=${encodeURIComponent(p)}${inline ? '&inline=1' : ''}${extra}`;
 
+// thumbUrl is a small server-made JPEG of an image (falls back to the file in <img onerror>).
+export const thumbUrl = (p, size = 256) => `/api/files/thumb?path=${encodeURIComponent(p)}&size=${size >= 300 || devicePixelRatio > 1.5 ? 512 : 256}`;
+const THUMBABLE = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+export const hasThumb = (name) => THUMBABLE.includes(extOf(name));
+
 export function downloadFile(p) {
   const a = h('a', { href: fileUrl(p), download: baseOf(p) });
   document.body.append(a);

@@ -2,6 +2,7 @@
 // when the window closes or the device sleeps; reopening reattaches with recent output.
 import { h, icon, api, report, toast, menu, confirmDialog, debounce } from '../core.js';
 import { registerApp } from '../wm.js';
+import { share } from '../clipboard.js';
 
 registerApp({
   id: 'terminal', name: 'Terminal', icon: 'terminal', color: ['#64748b', '#0f172a'], width: 900, height: 560, minWidth: 420,
@@ -219,7 +220,9 @@ function mountTerminal(win, args) {
 
   function copySelection(tab) {
     const text = tab.term.getSelection();
-    if (text) navigator.clipboard.writeText(text).then(() => toast('Copied'), report);
+    if (!text) return;
+    share(text);
+    navigator.clipboard.writeText(text).then(() => toast('Copied, also to your other devices'), () => toast('Sent to your shared clipboard'));
   }
 
   function paste(tab) {

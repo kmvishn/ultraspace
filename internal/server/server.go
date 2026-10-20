@@ -16,6 +16,7 @@ import (
 	"ultraspace/internal/agent"
 	"ultraspace/internal/auth"
 	"ultraspace/internal/browser"
+	"ultraspace/internal/clip"
 	"ultraspace/internal/config"
 	"ultraspace/internal/files"
 	"ultraspace/internal/httpx"
@@ -47,6 +48,7 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 		Idle: cfg.Browser.Idle.Duration, NoSandbox: cfg.Browser.NoSandbox, Quality: cfg.Browser.Quality,
 		Profile: cfg.MemoryProfile,
 	}, log)
+	fm.SetThumbDir(filepath.Join(cfg.DataDir, "thumbs"))
 	cleanup := func() { rb.Shutdown(); fm.Close(); st.Close() }
 
 	proxy := httpx.Proxy{Trust: cfg.TrustProxy}
@@ -73,6 +75,7 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 	browser.New(log).Register(mux, a.Require)
 	rb.Register(mux, a.Require)
 	navidrome.New(st, log).Register(mux, a.Require)
+	clip.New(st, log).Register(mux, a.Require)
 	agent.NewClient(cfg.AgentSocket, proxy, cfg.PublicOrigin).Register(mux, a.Require)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": version})

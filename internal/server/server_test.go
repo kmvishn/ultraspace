@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"image"
+	"image/jpeg"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -615,5 +618,142 @@ func TestCoverSearch(t *testing.T) {
 		if !got[k] {
 			t.Fatalf("covers = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestClipboardAndEvents(t *testing.T) {
+	c, cfg := setup(t)
+	c.do("POST", "/api/setup", map[string]string{"token": token(t, cfg), "username": "admin", "password": "correct-horse-1"}, nil)
+
+	// Another device listens for live events.
+	req, _ := http.NewRequest("GET", c.base+"/api/events", nil)
+	res, err := c.http.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if ct := res.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("events content type = %q", ct)
+	}
+	got := make(chan string, 4)
+	go func() {
+		buf := make([]byte, 4096)
+		var acc string
+		for {
+			n, err := res.Body.Read(buf)
+			acc += string(buf[:n])
+			if strings.Contains(acc, "event: clipboard\n") {
+				got <- acc
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	if code, out := c.do("POST", "/api/clipboard", map[string]string{"text": "hello from the phone", "device": "Phone", "origin": "dev-1"}, nil); code != 200 || out["text"] != "hello from the phone" {
+		t.Fatalf("add = %d %v", code, out)
+	}
+	select {
+	case ev := <-got:
+		if !strings.Contains(ev, "hello from the phone") || !strings.Contains(ev, `"origin":"dev-1"`) {
+			t.Fatalf("event = %q", ev)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no clipboard event")
+	}
+	c.do("POST", "/api/clipboard", map[string]string{"text": "second", "device": "Laptop"}, nil)
+	c.do("POST", "/api/clipboard", map[string]string{"text": "hello from the phone", "device": "Laptop"}, nil) // re-sent: moves to the top, no duplicate
+	_, out := c.do("GET", "/api/clipboard", nil, nil)
+	items := out["items"].([]any)
+	if len(items) != 2 || items[0].(map[string]any)["text"] != "hello from the phone" {
+		t.Fatalf("history = %v", items)
+	}
+	id := items[1].(map[string]any)["id"].(string)
+	c.do("DELETE", "/api/clipboard/"+id, nil, nil)
+	if _, out := c.do("GET", "/api/clipboard", nil, nil); len(out["items"].([]any)) != 1 {
+		t.Fatalf("after delete = %v", out)
+	}
+	if code, _ := c.do("GET", "/api/state/clipboard", nil, nil); code != 404 {
+		t.Fatalf("clipboard readable through the state API: %d", code)
+	}
+}
+
+// exifJPEG makes a w×h JPEG carrying EXIF orientation and a date taken.
+func exifJPEG(t *testing.T, w, h, orientation int, taken string) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	var body bytes.Buffer
+	if err := jpeg.Encode(&body, img, nil); err != nil {
+		t.Fatal(err)
+	}
+	// TIFF (little-endian): IFD0 with Orientation and an Exif IFD pointer; Exif IFD with DateTimeOriginal.
+	le := binary.LittleEndian
+	tiff := make([]byte, 0, 128)
+	tiff = append(tiff, 'I', 'I', 42, 0, 8, 0, 0, 0)
+	entry := func(tag, typ uint16, count, val uint32) {
+		tiff = le.AppendUint16(tiff, tag)
+		tiff = le.AppendUint16(tiff, typ)
+		tiff = le.AppendUint32(tiff, count)
+		tiff = le.AppendUint32(tiff, val)
+	}
+	tiff = le.AppendUint16(tiff, 2)
+	entry(0x0112, 3, 1, uint32(orientation))
+	exifOff := uint32(8 + 2 + 2*12 + 4)
+	entry(0x8769, 4, 1, exifOff)
+	tiff = le.AppendUint32(tiff, 0)
+	tiff = le.AppendUint16(tiff, 1)
+	dateOff := exifOff + 2 + 12 + 4
+	entry(0x9003, 2, uint32(len(taken)+1), dateOff)
+	tiff = le.AppendUint32(tiff, 0)
+	tiff = append(tiff, append([]byte(taken), 0)...)
+	app1 := append([]byte("Exif\x00\x00"), tiff...)
+	seg := []byte{0xFF, 0xE1, byte((len(app1) + 2) >> 8), byte(len(app1) + 2)}
+	b := body.Bytes()
+	return append(append(append([]byte{}, b[:2]...), append(seg, app1...)...), b[2:]...)
+}
+
+func TestPhotosAndThumbnails(t *testing.T) {
+	c, cfg := setup(t)
+	c.do("POST", "/api/setup", map[string]string{"token": token(t, cfg), "username": "admin", "password": "correct-horse-1"}, nil)
+	os.MkdirAll(filepath.Join(cfg.FilesRoot, "Photos", ".hidden"), 0o755)
+	os.WriteFile(filepath.Join(cfg.FilesRoot, "Photos", "phone.jpg"), exifJPEG(t, 800, 600, 6, "2021:07:04 18:30:00"), 0o644)
+	os.WriteFile(filepath.Join(cfg.FilesRoot, "Photos", "plain.jpg"), exifJPEG(t, 300, 200, 1, "2019:01:02 03:04:05"), 0o644)
+	os.WriteFile(filepath.Join(cfg.FilesRoot, "Photos", ".hidden", "skip.jpg"), exifJPEG(t, 10, 10, 1, "2020:01:01 00:00:00"), 0o644)
+
+	_, out := c.do("GET", "/api/files/photos", nil, nil)
+	ph := out["photos"].([]any)
+	if len(ph) != 2 {
+		t.Fatalf("photos = %v", ph)
+	}
+	first := ph[0].(map[string]any)
+	if first["path"] != "/Photos/phone.jpg" || !strings.HasPrefix(first["taken"].(string), "2021-07-04T18:30:00") {
+		t.Fatalf("newest photo = %v", first)
+	}
+	if first["w"] != float64(600) || first["h"] != float64(800) {
+		t.Fatalf("rotated photo should report 600x800, got %v x %v", first["w"], first["h"])
+	}
+
+	res, err := c.http.Get(c.base + "/api/files/thumb?path=/Photos/phone.jpg&size=256")
+	if err != nil {
+		t.Fatal(err)
+	}
+	thumb, err := jpeg.Decode(res.Body)
+	res.Body.Close()
+	if err != nil {
+		t.Fatalf("thumb: %v (status %d)", err, res.StatusCode)
+	}
+	if b := thumb.Bounds(); b.Dx() != 192 || b.Dy() != 256 {
+		t.Fatalf("thumb size = %v, want upright 192x256", b)
+	}
+	etag := res.Header.Get("ETag")
+	req, _ := http.NewRequest("GET", c.base+"/api/files/thumb?path=/Photos/phone.jpg&size=256", nil)
+	req.Header.Set("If-None-Match", etag)
+	if res, _ := c.http.Do(req); res.StatusCode != http.StatusNotModified {
+		t.Fatalf("cached thumb = %d, want 304", res.StatusCode)
+	}
+	if code, _ := c.do("GET", "/api/files/thumb?path=/notes.txt", nil, nil); code != 404 && code != 415 {
+		t.Fatalf("thumb of a non-image = %d", code)
 	}
 }

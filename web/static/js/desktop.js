@@ -5,6 +5,7 @@ import {
 } from './core.js';
 import { initWM, allApps, openApp, openFile, windowsOf, focusedWindow, closeAllWindows } from './wm.js';
 import { stopSession } from './session.js';
+import { startEvents, stopEvents, togglePanel } from './clipboard.js';
 import { webTarget } from './apps/browser.js';
 
 export const WALLPAPERS = [
@@ -74,7 +75,8 @@ export function buildDesktop(user, { onSignOut }) {
   };
   addEventListener('keydown', onKey);
   cleanup.push(() => removeEventListener('keydown', onKey));
-  cleanup.push(() => { stopSession(); closeAllWindows(); });
+  cleanup.push(() => { stopSession(); stopEvents(); closeAllWindows(); });
+  startEvents();
   system.start();
   cleanup.push(() => system.stop());
   return root;
@@ -112,6 +114,7 @@ function menuBar(user, onSignOut) {
     h('div', { class: 'mb-spacer' }),
     nowPlaying,
     h('div', { class: 'mb-stats' }, stat('cpu', cpu, 'CPU'), stat('memory', mem, 'Memory'), stat('arrowDown', net, 'Network')),
+    h('button', { class: 'mb-item mb-clip', 'aria-label': 'Shared clipboard', title: 'Shared clipboard', onclick: (e) => togglePanel(e.currentTarget) }, icon('clipboard', 15)),
     h('button', { class: 'mb-item', 'aria-label': 'Search', title: 'Search (Ctrl K)', onclick: openLauncher }, icon('search', 15)),
     h('button', { class: 'mb-item', onclick: () => openApp('settings', { section: 'account' }) }, icon('user', 15), h('span', { class: 'mb-user' }, user.username)),
     clock);

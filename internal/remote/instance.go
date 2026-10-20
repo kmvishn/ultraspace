@@ -48,6 +48,7 @@ type instance struct {
 	cmd   *exec.Cmd
 	conn  *cdp
 	proxy *egressProxy
+	audio *audio
 	log   *slog.Logger
 
 	mu        sync.Mutex
@@ -86,6 +87,7 @@ func (m *Manager) launch(userID int64) (*instance, error) {
 	if err != nil {
 		return nil, err
 	}
+	snd := m.startPulse()
 
 	// Pipes: Chrome reads commands on fd 3 and writes replies on fd 4.
 	cmdR, cmdW, err := os.Pipe()
@@ -112,8 +114,11 @@ func (m *Manager) launch(userID int64) (*instance, error) {
 		"--disable-gpu", "--disable-software-rasterizer", "--disable-dev-shm-usage", "--disable-extensions", "--disable-component-update",
 		"--disable-background-networking", "--disable-sync", "--disable-default-apps", "--disable-breakpad",
 		"--disable-features=Translate,MediaRouter,OptimizationHints,DialMediaRouteProvider,AutofillServerCommunication,BackForwardCache",
-		fmt.Sprintf("--renderer-process-limit=%d", m.prof.RendererLimit), "--mute-audio", "--lang=en-US",
+		fmt.Sprintf("--renderer-process-limit=%d", m.prof.RendererLimit), "--lang=en-US", "--autoplay-policy=no-user-gesture-required",
 		"--window-size=1280,800",
+	}
+	if !snd.enabled {
+		args = append(args, "--mute-audio") // no sound server: nothing to play into
 	}
 	if m.prof.Name == "tiny" {
 		// A smaller young generation trades a little speed for memory.
@@ -126,6 +131,7 @@ func (m *Manager) launch(userID int64) (*instance, error) {
 	cmd := exec.Command(m.opts.ChromePath, args...)
 	cmd.ExtraFiles = []*os.File{cmdR, outW}
 	cmd.Env = append(os.Environ(), "HOME="+dir, "XDG_CONFIG_HOME="+filepath.Join(dir, "config"), "XDG_CACHE_HOME="+filepath.Join(dir, "cache"))
+	cmd.Env = append(cmd.Env, snd.chromeEnv()...)
 	cmd.Dir = dir
 	// Own process group, so stopping kills Chrome's helpers too. systemd also kills
 	// them if ultraspace itself goes away.
@@ -133,6 +139,7 @@ func (m *Manager) launch(userID int64) (*instance, error) {
 	logw := &lineLogger{log: m.log}
 	cmd.Stdout, cmd.Stderr = logw, logw
 	if err := cmd.Start(); err != nil {
+		snd.close()
 		proxy.Close()
 		cmdR.Close()
 		cmdW.Close()
@@ -145,7 +152,7 @@ func (m *Manager) launch(userID int64) (*instance, error) {
 	sysmem.PreferOOMKill(cmd.Process.Pid, 500)
 
 	in := &instance{
-		m: m, userID: userID, dir: dir, cmd: cmd, conn: newCDP(outR, cmdW), proxy: proxy, log: m.log,
+		m: m, userID: userID, dir: dir, cmd: cmd, conn: newCDP(outR, cmdW), proxy: proxy, audio: snd, log: m.log,
 		tabs: map[string]*Tab{}, clients: map[*client]struct{}{}, vp: viewport{W: 1280, H: 800, DPR: 1},
 		dialogs: map[string]string{}, downloads: map[string]string{}, stopped: make(chan struct{}),
 	}
@@ -299,6 +306,7 @@ func (in *instance) Stop() {
 func (in *instance) shutdown() {
 	in.stopOnce.Do(func() {
 		in.proxy.Close()
+		in.audio.close()
 		if in.cmd.Process != nil {
 			_ = syscall.Kill(-in.cmd.Process.Pid, syscall.SIGKILL)
 		}
@@ -868,10 +876,11 @@ func (in *instance) broadcastJSON(v any) {
 }
 
 func (in *instance) broadcastFrame(img []byte) {
+	msg := prefixed(msgFrame, img)
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	for c := range in.clients {
-		c.sendFrame(img)
+		c.sendFrame(msg)
 	}
 }
 
@@ -887,6 +896,7 @@ func (in *instance) addClient(c *client) {
 	active := in.active
 	in.mu.Unlock()
 	c.sendJSON(map[string]any{"t": "status", "state": "ready"})
+	c.sendJSON(map[string]any{"t": "audio", "available": in.audio.enabled})
 	c.sendJSON(in.snapshot())
 	if active != "" {
 		in.startCast(active)
@@ -894,6 +904,7 @@ func (in *instance) addClient(c *client) {
 }
 
 func (in *instance) removeClient(c *client) {
+	in.audio.setListening(c, false)
 	in.mu.Lock()
 	delete(in.clients, c)
 	left := len(in.clients)

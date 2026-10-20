@@ -27,9 +27,14 @@ import (
 var errBadPath = errors.New("invalid path")
 
 type Files struct {
-	root *os.Root
-	log  *slog.Logger
+	root     *os.Root
+	log      *slog.Logger
+	thumbDir string // thumbnail cache; empty disables caching
+	photos   photoCache
 }
+
+// SetThumbDir sets where generated thumbnails are cached.
+func (f *Files) SetThumbDir(dir string) { f.thumbDir = dir }
 
 func New(dir string, log *slog.Logger) (*Files, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -54,6 +59,7 @@ func (f *Files) Register(mux *http.ServeMux, auth func(http.Handler) http.Handle
 	handle("POST /api/files/delete", f.handleDelete)
 	handle("POST /api/files/write", f.handleWrite)
 	handle("GET /api/files/search", f.handleSearch)
+	f.registerPhotos(handle)
 }
 
 const maxTextWrite = 5 << 20
@@ -151,6 +157,9 @@ func (f *Files) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		if p == "." || strings.HasPrefix(d.Name(), ".ultraspace-") {
 			return nil
+		}
+		if d.IsDir() && skipDir(d.Name()) {
+			return fs.SkipDir
 		}
 		name := strings.ToLower(d.Name())
 		if q != "" && !strings.Contains(name, q) {

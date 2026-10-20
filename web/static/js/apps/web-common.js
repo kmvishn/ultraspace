@@ -69,7 +69,7 @@ export function siteIcon(url, size = 'sm') {
 // ---------- bookmarks and history, shared by all browser windows ----------
 
 export const data = {
-  value: { bookmarks: [], history: [], engine: 'google', mode: 'auto', sharp: false },
+  value: { bookmarks: [], history: [], engine: 'google', mode: 'auto', sharp: false, sound: false },
   fetched: 0,
   chain: Promise.resolve(),
   async refresh(force = false) {
