@@ -13,9 +13,9 @@ song and position are waiting for you.
 ┌──────────────────────────────────────────────────────────────────────┐
 │ ◉ Files                          ▣ 6%  ▤ 41%  ↓ 120 KB/s  🔍  user  12:04 │
 │  ┌─────────────── Files ───────────────┐   ┌──── Terminal ────────┐   │
-│  │ Places   ‹ › ↑  Home › Music        │   │ ubuntu@v1:~$ go test │   │
+│  │ Places   ‹ › ↑  Home › Music        │   │ me@server:~$ go test │   │
 │  │ Home     ▢ Lo-fi   ▢ Night Drive    │   │ ok  ultraspace 1.2s  │   │
-│  │ Music    ▢ cover.jpg                │   │ ubuntu@v1:~$ █       │   │
+│  │ Music    ▢ cover.jpg                │   │ me@server:~$ █       │   │
 │  └─────────────────────────────────────┘   └──────────────────────┘   │
 │                  [ 🌐 ][ 📁 ][ 📈 ][ 🎵 ][ ⚙ ][ >_ ][ ‹› ]             │
 └──────────────────────────────────────────────────────────────────────┘
@@ -313,7 +313,7 @@ and cgroup protection, address-family restrictions, and memory limits so Chrome 
 
 ## Requirements
 
-- Linux, x86-64 or arm64. Tested on **Ubuntu 24.04** (Oracle Cloud free tier, 1 GB RAM + 2 GB swap).
+- Linux, x86-64 or arm64. Tested on **Ubuntu 24.04** with 1 GB of RAM and 2 GB of swap.
 - Go **1.26+** to build.
 - nginx (or any TLS reverse proxy) and a domain for HTTPS — a free [DuckDNS](https://www.duckdns.org) name and
   Let's Encrypt work well.
@@ -383,7 +383,7 @@ sudo certbot --nginx -d ultraspace.example.com
 ```
 
 The nginx site passes WebSocket upgrades, disables buffering (for uploads and streams) and allows large uploads.
-Open ports 80 and 443 in your firewall (on Oracle Cloud: both the instance's iptables and the VCN security list).
+Open ports 80 and 443 in your firewall (on some clouds, both the host's own firewall and the provider's network rules).
 
 ### 4. Server browser (optional)
 
