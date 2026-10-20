@@ -99,10 +99,20 @@ function supports(m, resource, type, id) {
 const extrasOf = (c) => (c.extra || []).map((e) => (typeof e === 'string' ? { name: e } : e)).concat((c.extraSupported || []).map((name) => ({ name })));
 const requiredOf = (c) => [...(c.extra || []).filter((e) => e.isRequired).map((e) => e.name), ...(c.extraRequired || [])];
 
-function call(addon, resource, type, id, extra) {
+// Some addons send HTML entities in plain text ("O&apos;Dea"); decode them everywhere.
+const ENT = { amp: '&', apos: "'", quot: '"', lt: '<', gt: '>', nbsp: '\u00a0' };
+const unent = (s) => s.replace(/&(#x[0-9a-f]+|#\d+|amp|apos|quot|lt|gt|nbsp);/gi, (m, e) => {
+  if (e[0] !== '#') return ENT[e.toLowerCase()];
+  const n = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : +e.slice(1);
+  return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : m;
+});
+const decode = (v) => (typeof v === 'string' ? unent(v) : Array.isArray(v) ? v.map(decode)
+  : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, decode(x)])) : v);
+
+async function call(addon, resource, type, id, extra) {
   const q = new URLSearchParams({ addon: addon.url, resource, type, id });
   if (extra) q.set('extra', new URLSearchParams(extra).toString());
-  return api('GET', `/api/stremio/addon?${q}`);
+  return decode(await api('GET', `/api/stremio/addon?${q}`));
 }
 
 function mountStremio(win, args) {
