@@ -14,6 +14,8 @@ home lab, without turning them into a workstation.
 Sign in on your laptop, close the lid, open your phone: the same windows, tabs, terminal sessions,
 song and position are waiting for you.
 
+![The ultraspace desktop: Files and Music windows, the clock and system widgets, and the dock](docs/screenshots/desktop.webp)
+
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │ ◉ Files                          ▣ 6%  ▤ 41%  ↓ 120 KB/s  🔍  user  12:04 │
@@ -34,6 +36,20 @@ song and position are waiting for you.
 - **Heavy parts start on demand**: Chrome, VS Code and the torrent engine run only while needed and stop when idle.
 - **Security first**: setup token, hashed sliding sessions, CSRF and origin checks, strict CSP, systemd sandboxing,
   and an egress filter on the remote browser.
+
+---
+
+## Screenshots
+
+| | |
+| --- | --- |
+| ![Stremio: a title page with poster, details and stream addons](docs/screenshots/stremio.webp) | ![Torrents: two downloads with progress, peers and the file list](docs/screenshots/torrents.webp) |
+| **Stremio** — catalogs, title pages, streams from your addons | **Torrents** — download into Files, play while downloading |
+| ![Videos: Big Buck Bunny paused with the player controls](docs/screenshots/video.webp) | ![The Stremio app on a phone](docs/screenshots/phone.webp) |
+| **Videos** — plays almost any format, converting on the server when needed | **Phones** — full-screen windows, drawers and touch sizes |
+
+<sub>Shown: *Big Buck Bunny* and *Sintel* © Blender Foundation (CC BY 3.0), *Night of the Living Dead* (1968, public
+domain); title artwork from Stremio's Cinemeta. Photos and music in the demo are generated.</sub>
 
 ---
 
@@ -59,6 +75,7 @@ song and position are waiting for you.
 
 ## Contents
 
+- [Screenshots](#screenshots)
 - [Where it runs](#where-it-runs)
 - [Apps](#apps)
 - [How it works](#how-it-works)
