@@ -192,6 +192,7 @@ saved on the server.
   replays the recent output (512 KB of scrollback per session).
 - Tabs, titles from the shell, clickable links, Ctrl+Shift+C / Ctrl+Shift+V, right-click menu.
 - On touch devices, an extra key row: Esc, Tab, sticky Ctrl, arrows, `| ~ / -`.
+- Setup: [Installing on a server → 5. Terminal and VS Code](#5-terminal-and-vs-code-optional).
 
 ### VS Code
 
@@ -203,6 +204,7 @@ saved on the server.
 - Runs lean by default: a smaller Node.js heap setting and memory-hungry extras (AI agent host, experiments,
   update checks, telemetry) turned off, which measured about 27% less memory. Existing settings are only ever
   added to, once.
+- Setup: install code-server as in [step 5](#5-terminal-and-vs-code-optional).
 
 ### Videos
 
@@ -571,18 +573,73 @@ The `[browser]` section in the example config already points at this path.
 
 ### 5. Terminal and VS Code (optional)
 
-```sh
-# code-server release tarball (verify the published sha256)
-sudo tar -xzf code-server-*-linux-amd64.tar.gz -C /opt/ultraspace
-sudo mv /opt/ultraspace/code-server-*-linux-amd64 /opt/ultraspace/code-server
+**How they connect.** The web service runs as the unprivileged `ultraspace` user and cannot start a shell
+itself. Shells and VS Code belong to a second process, `ultraspace agent`, which runs as your Linux login user.
+The two talk over a Unix socket that only the `ultraspace` group can open:
 
-# edit User=/Group= and SocketUser= if your login user is not "ubuntu"
-sudo cp deploy/ultraspace-agent.socket deploy/ultraspace-agent.service /etc/systemd/system/
+```
+browser ──HTTPS──▶ ultraspace (user ultraspace) ──/run/ultraspace-agent.sock──▶ ultraspace agent (user ubuntu)
+                    checks your web login                                        ├─ shells (Terminal)
+                                                                                 └─ code-server (VS Code)
+```
+
+You sign in with your **ultraspace** account; no Linux password or SSH key is involved, and SSH is left exactly as
+it was. The Terminal works without code-server; VS Code needs it.
+
+**a) Choose the user.** Terminal and VS Code can do anything this user can, including `sudo` if it has it (see
+[Security model](#security-model)). Use your normal login user (`ubuntu` below), or create one without sudo:
+
+```sh
+sudo useradd --create-home --shell /bin/bash dev    # then use U=dev in step c
+```
+
+**b) Install code-server** (for VS Code; skip it for Terminal only):
+
+```sh
+VER=4.141.0 ARCH=amd64          # ARCH=arm64 on ARM servers (Ampere, Graviton, Raspberry Pi)
+curl -fLO https://github.com/coder/code-server/releases/download/v$VER/code-server-$VER-linux-$ARCH.tar.gz
+sha256sum code-server-$VER-linux-$ARCH.tar.gz
+# compare with the sha256 GitHub lists next to that file on github.com/coder/code-server/releases
+sudo mkdir -p /opt/ultraspace
+sudo tar -xzf code-server-$VER-linux-$ARCH.tar.gz -C /opt/ultraspace
+sudo mv /opt/ultraspace/code-server-$VER-linux-$ARCH /opt/ultraspace/code-server
+/opt/ultraspace/code-server/bin/code-server --version
+```
+
+**c) Install the agent units** for your user. The `ultraspace` group already exists from step 2:
+
+```sh
+U=ubuntu                        # the user from step a
+sed "s/^SocketUser=.*/SocketUser=$U/" deploy/ultraspace-agent.socket |
+  sudo tee /etc/systemd/system/ultraspace-agent.socket >/dev/null
+sed -e "s/^User=.*/User=$U/" -e "s/^Group=.*/Group=$(id -gn $U)/" deploy/ultraspace-agent.service |
+  sudo tee /etc/systemd/system/ultraspace-agent.service >/dev/null
 sudo systemctl daemon-reload
 sudo systemctl enable --now ultraspace-agent.socket
 ```
 
-The agent is socket-activated: it starts on the first Terminal or VS Code request.
+The agent is socket-activated: nothing runs until the first Terminal or VS Code request, and the `ultraspace`
+service does not need a restart. If code-server lives somewhere else, change `-code-server` in `ExecStart=`.
+
+**d) Check it:**
+
+```sh
+systemctl status ultraspace-agent.socket     # active (listening)
+ls -l /run/ultraspace-agent.sock             # srw-rw---- ubuntu ultraspace
+```
+
+Open the Terminal app: you should get a shell as your user (`whoami`), and `systemctl status ultraspace-agent`
+now shows it running. VS Code takes a few seconds the first time.
+
+| Message in the app | Fix |
+|---|---|
+| "the terminal service (ultraspace-agent) is not installed or not running" | `sudo systemctl enable --now ultraspace-agent.socket`; check the socket's owner/group with `ls -l` as above; `journalctl -u ultraspace-agent` |
+| "VS Code (code-server) is not installed at …" | code-server is missing at that path: repeat step b, or fix `-code-server` in `ExecStart=` |
+| Shell opens as the wrong user | edit `User=`/`Group=` and `SocketUser=`, `daemon-reload`, then `sudo systemctl restart ultraspace-agent.socket ultraspace-agent` |
+
+**Updating code-server:** unpack the new version as in step b, but move the old folder aside first
+(`sudo mv /opt/ultraspace/code-server /opt/ultraspace/code-server.old`), then `sudo systemctl restart ultraspace-agent`.
+Restarting the agent ends open terminal sessions; VS Code keeps its editors, unsaved changes and extensions.
 
 ### 6. Updating
 
