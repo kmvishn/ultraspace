@@ -166,6 +166,10 @@ func aiProviders(c config.AI) []aichat.Provider {
 			ps[i].Base = strings.TrimRight(c.GeminiURL, "/")
 		case ps[i].ID == "mistral" && c.MistralURL != "":
 			ps[i].Base = strings.TrimRight(c.MistralURL, "/")
+		case ps[i].ID == "groq" && c.GroqURL != "":
+			ps[i].Base = strings.TrimRight(c.GroqURL, "/")
+		case ps[i].ID == "openrouter" && c.OpenRouterURL != "":
+			ps[i].Base = strings.TrimRight(c.OpenRouterURL, "/")
 		}
 	}
 	return ps

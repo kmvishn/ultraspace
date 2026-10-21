@@ -1,5 +1,5 @@
 // Ultra Chat Bot: a floating bubble at the bottom-right that opens a chat with hosted
-// models (Gemini, Mistral). Keys live on the server, answers stream in, conversations
+// models (Gemini, Mistral, Groq, OpenRouter). Keys live on the server, answers stream in, conversations
 // are saved on the server, and the open window (note, file, terminal) can be included
 // as context. Optional Brave web search adds cited sources.
 import { h, icon, api, report, toast, menu, confirmDialog, fmtAgo, emit, on } from './core.js';
@@ -115,7 +115,7 @@ async function openPanel() {
     modelSel.classList.add('hidden');
     body.replaceChildren(h('div', { class: 'uc-empty' }, h('span', { class: 'uc-big' }, icon('sparkles', 30)),
       h('h3', null, 'Set up Ultra Chat Bot'),
-      h('p', null, 'Add a Gemini or Mistral API key in Settings. Keys stay on your server.'),
+      h('p', null, 'Add a Gemini, Mistral, Groq or OpenRouter API key in Settings. Keys stay on your server.'),
       h('button', { class: 'btn primary', onclick: () => { closePanel(); openApp('settings', { section: 'chatbot' }); } }, icon('sliders', 15), 'Open settings')));
     input.disabled = true;
     return;
@@ -312,7 +312,7 @@ async function openPanel() {
 
 // Prefer a fast general model when nothing was chosen before.
 function pickDefault(models) {
-  const pref = [/gemini-[\d.]+-flash$/, /mistral-small-latest/, /mistral-medium-latest/, /flash/, /latest/];
+  const pref = [/gemini-[\d.]+-flash$/, /mistral-small-latest/, /mistral-medium-latest/, /llama-3\.3-70b-versatile/, /flash/, /latest/];
   for (const re of pref) { const m = models.find((x) => re.test(x.name)); if (m) return m.id; }
   return models[0]?.id || '';
 }

@@ -294,8 +294,9 @@ ultraspace ships no stream addons. Only install addons you trust and only watch 
 
 A floating ✨ bubble at the bottom-right (Ctrl+J) opens a chat with hosted models.
 
-- **Models:** Gemini and Mistral, through their OpenAI-compatible APIs. The model list is fetched live from each
-  provider (chat models only; dated aliases folded into `-latest`), so new models appear on their own.
+- **Models:** Gemini, Mistral, Groq (free tier, very fast) and OpenRouter (its `:free` models only), all
+  through their OpenAI-compatible APIs. The model list is fetched live from each provider (chat models only;
+  dated aliases folded into `-latest`), so new models appear on their own.
 - **Keys stay on the server:** paste them in Settings → Ultra Chat Bot. The server stores them, calls the
   provider and streams the answer back; the browser only ever sees `saved ••••abcd`.
 - **Web search (optional):** with a Brave Search API key, the 🌐 Web chip looks the question up first, gives the

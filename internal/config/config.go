@@ -49,9 +49,11 @@ type Torrent struct {
 // AI configures Ultra Chat Bot. The API keys themselves are entered in Settings and
 // kept in the database; these only override the services' addresses.
 type AI struct {
-	GeminiURL  string `toml:"gemini_url"`  // OpenAI-compatible root; default Google's
-	MistralURL string `toml:"mistral_url"` // default https://api.mistral.ai/v1
-	BraveURL   string `toml:"brave_url"`   // web search endpoint; default Brave's
+	GeminiURL     string `toml:"gemini_url"`     // OpenAI-compatible root; default Google's
+	MistralURL    string `toml:"mistral_url"`    // default https://api.mistral.ai/v1
+	GroqURL       string `toml:"groq_url"`       // default https://api.groq.com/openai/v1
+	OpenRouterURL string `toml:"openrouter_url"` // default https://openrouter.ai/api/v1
+	BraveURL      string `toml:"brave_url"`      // web search endpoint; default Brave's
 }
 
 // Browser configures the remote Chrome behind the Browser app.

@@ -1,5 +1,5 @@
 // Package aichat is the server side of Ultra Chat Bot: a chat with hosted models
-// (Gemini and Mistral, both via their OpenAI-compatible APIs). API keys are kept on
+// (Gemini, Mistral, Groq and OpenRouter, all via their OpenAI-compatible APIs). API keys are kept on
 // the server and never sent to the browser; the server calls the provider and
 // streams the answer back. Conversations are stored per user, so they follow you
 // to every device.
@@ -44,6 +44,9 @@ type Provider struct {
 	ID   string
 	Name string
 	Base string // OpenAI-compatible API root, e.g. https://api.mistral.ai/v1
+	// FreeOnly lists just the no-cost models (ids ending in ":free"); OpenRouter
+	// offers hundreds of models and most of them are paid.
+	FreeOnly bool
 }
 
 // DefaultProviders are the hosted APIs Ultra Chat Bot knows about.
@@ -51,6 +54,8 @@ func DefaultProviders() []Provider {
 	return []Provider{
 		{ID: "gemini", Name: "Gemini", Base: "https://generativelanguage.googleapis.com/v1beta/openai"},
 		{ID: "mistral", Name: "Mistral", Base: "https://api.mistral.ai/v1"},
+		{ID: "groq", Name: "Groq", Base: "https://api.groq.com/openai/v1"},
+		{ID: "openrouter", Name: "OpenRouter", Base: "https://openrouter.ai/api/v1", FreeOnly: true},
 	}
 }
 
@@ -196,8 +201,9 @@ func (h *Handler) putConfig(w http.ResponseWriter, r *http.Request) {
 
 func cacheKey(userID int64, provider string) string { return fmt.Sprint(userID, "/", provider) }
 
-// Gemini's list includes embedding, image and audio models; keep the chat ones.
-var notChat = regexp.MustCompile(`embed|imagen|veo|tts|aqa|image|audio|live|vision|moderation|ocr|transcribe|fim`)
+// Gemini's list includes embedding, image and audio models, Groq's speech and safety
+// classifiers; keep the chat ones.
+var notChat = regexp.MustCompile(`embed|imagen|veo|tts|aqa|image|audio|live|vision|moderation|ocr|transcribe|fim|whisper|guard|safety`)
 
 // dated matches versioned ids like "ministral-8b-2512" (Mistral) whose "-latest" alias is also listed.
 var dated = regexp.MustCompile(`^(.*)-\d{4}$`)
@@ -245,6 +251,7 @@ func (h *Handler) models_(ctx context.Context, userID int64, p Provider, key str
 		Data []struct {
 			ID           string `json:"id"`
 			Deprecation  any    `json:"deprecation"`
+			Active       *bool  `json:"active"` // Groq marks retired models inactive
 			Capabilities *struct {
 				Chat bool `json:"completion_chat"`
 			} `json:"capabilities"`
@@ -258,6 +265,7 @@ func (h *Handler) models_(ctx context.Context, userID int64, p Provider, key str
 	for _, m := range body.Data {
 		id := strings.TrimPrefix(m.ID, "models/")
 		if id == "" || seen[id] || notChat.MatchString(strings.ToLower(id)) || m.Deprecation != nil ||
+			m.Active != nil && !*m.Active || p.FreeOnly && !strings.HasSuffix(id, ":free") ||
 			m.Capabilities != nil && !m.Capabilities.Chat {
 			continue
 		}
