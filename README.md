@@ -482,7 +482,24 @@ sudo ./install.sh --lan    # prints the setup token and the address to open
 
 `install.sh` installs the binary, creates the `ultraspace` user, writes `/etc/ultraspace/config.toml` (only if
 there is none) and starts the systemd service. Without `--lan` it listens on 127.0.0.1 for a reverse proxy.
-Run a newer release's `install.sh` the same way to update; your config and data are kept.
+Run in a terminal, it then offers the optional parts that are not installed yet, and does each one for you:
+
+```
+Set up Terminal and VS Code? [y/N] y
+Run them as which Linux user? [ubuntu]
+Include VS Code (code-server, about 240 MB download, ~700 MB on disk)? [Y/n]
+Set up the server browser? [y/N] y
+Install ffmpeg? [y/N] y
+```
+
+It picks the right build for the CPU (x86-64 or ARM64), checks code-server's sha256 against the one GitHub
+publishes and Chrome's download against Google's, installs the libraries Chrome needs, writes the agent units for
+the user you name (or creates that user, without sudo) and checks the socket comes up. For scripts, the same
+choices are flags: `--terminal USER` (`--no-vscode` for the Terminal only), `--browser`, `--media`, or
+`--no-extras`.
+
+Run a newer release's `install.sh` the same way to update; your config and data are kept, and it only asks about
+parts you have not installed. Run it again with `--terminal OTHERUSER` to switch the Terminal to another user.
 
 Or by hand, from source:
 
@@ -498,8 +515,8 @@ sudo cat /var/lib/ultraspace/setup-token   # paste on the welcome screen
 ```
 
 Then open `http://<the-machine's-ip>:4600` on any phone, tablet or computer at home. The optional parts
-(server browser, Terminal and VS Code, sound, video conversion) install the same way as on a VPS: steps 4 and 5
-below. Keep `trust_proxy = false` when nothing sits in front of ultraspace.
+(server browser, Terminal and VS Code, sound, video conversion) are offered by `install.sh`, or install them by
+hand as in steps 4 and 5 below. Keep `trust_proxy = false` when nothing sits in front of ultraspace.
 
 Want HTTPS at home? Put [Caddy](https://caddyserver.com) in front (`reverse_proxy 127.0.0.1:4600` with
 `tls internal`), or run `tailscale serve --bg 4600` for a tailnet HTTPS address; then set `listen` back to
@@ -508,6 +525,10 @@ Want HTTPS at home? Put [Caddy](https://caddyserver.com) in front (`reverse_prox
 ---
 
 ## Installing on a server
+
+**The quick way:** unpack a release on the server and run `sudo ./install.sh` (see
+[Home lab](#home-lab--local-network) for the download). It does steps 1, 2, 4 and 5 below, asking about each
+optional part, so only HTTPS (step 3) is left. The rest of this section is the same thing by hand.
 
 The steps below are for a VPS reachable from the internet and match the files in `deploy/`. Replace `ultraspace.example.com` with your domain and `ubuntu` with
 the user Terminal and VS Code should run as.
@@ -549,6 +570,8 @@ Open ports 80 and 443 in your firewall (on some clouds, both the host's own fire
 
 ### 4. Server browser (optional)
 
+`install.sh` does this step if you answer yes (or pass `--browser`).
+
 ```sh
 # chrome-headless-shell from Chrome for Testing (linux64)
 sudo mkdir -p /opt/ultraspace
@@ -572,6 +595,8 @@ Check with `ldd /opt/ultraspace/chrome/chrome-headless-shell | grep 'not found'`
 The `[browser]` section in the example config already points at this path.
 
 ### 5. Terminal and VS Code (optional)
+
+`install.sh` does this step if you answer yes (or pass `--terminal USER`); below is what it does, by hand.
 
 **How they connect.** The web service runs as the unprivileged `ultraspace` user and cannot start a shell
 itself. Shells and VS Code belong to a second process, `ultraspace agent`, which runs as your Linux login user.
