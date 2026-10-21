@@ -340,5 +340,6 @@ function mountNotes(win, args) {
     onDestroy() { document.removeEventListener('visibilitychange', onVisible); },
     onFocus() { checkElsewhere(); },
     saveState: () => ({ path: current?.path || null }),
+    context: () => (current ? { title: noteName(current.path), text: area.value } : null),
   };
 }

@@ -98,6 +98,11 @@ function mountEditor(win, args) {
   return {
     async onClose() { return !dirty() || confirmDiscard(path); },
     onFocus() { if (!area.disabled) area.focus({ preventScroll: true }); },
+    // For Ultra Chat Bot: the selection if there is one, else the whole file.
+    context() {
+      const sel = area.value.slice(area.selectionStart, area.selectionEnd);
+      return { title: baseOf(path), text: sel || area.value };
+    },
     saveState() {
       if (!loaded) return restored || { path };
       const st = { path, cursor: area.selectionStart };

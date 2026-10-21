@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"io"
@@ -63,8 +64,17 @@ func (c *client) do(method, path string, body any, headers map[string]string) (i
 
 func setup(t *testing.T) (*client, config.Config) {
 	t.Helper()
+	return setupWith(t, nil)
+}
+
+// setupWith is setup with a chance to adjust the config first.
+func setupWith(t *testing.T, adjust func(*config.Config)) (*client, config.Config) {
+	t.Helper()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
+	if adjust != nil {
+		adjust(&cfg)
+	}
 	if err := cfg.Finalize(); err != nil {
 		t.Fatal(err)
 	}
@@ -1002,5 +1012,120 @@ func TestStremioAccountNotExposed(t *testing.T) {
 	}
 	if code, _ := c.do("PUT", "/api/state/stremio-account", map[string]any{"device": "d", "data": map[string]string{"authKey": "x"}}, nil); code != 404 {
 		t.Errorf("write session record = %d, want 404", code)
+	}
+}
+
+func TestUltraChat(t *testing.T) {
+	var gotAuth, gotSearchKey string
+	var gotMessages []map[string]string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/gemini/models":
+			io.WriteString(w, `{"data":[{"id":"models/gemini-test-flash"},{"id":"models/text-embedding-004"}]}`)
+		case "/mistral/models":
+			io.WriteString(w, `{"data":[{"id":"mistral-small-latest","capabilities":{"completion_chat":true}},{"id":"mistral-embed","capabilities":{"completion_chat":false}}]}`)
+		case "/gemini/chat/completions":
+			gotAuth = r.Header.Get("Authorization")
+			var body struct {
+				Model    string              `json:"model"`
+				Messages []map[string]string `json:"messages"`
+				Stream   bool                `json:"stream"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			gotMessages = body.Messages
+			if body.Model != "gemini-test-flash" || !body.Stream {
+				http.Error(w, `{"error":{"message":"bad request"}}`, 400)
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			for _, part := range []string{"Hel", "lo [1]"} {
+				fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q}}]}\n\n", part)
+			}
+			io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+		case "/brave":
+			gotSearchKey = r.Header.Get("X-Subscription-Token")
+			io.WriteString(w, `{"web":{"results":[{"title":"Navidrome <strong>docs</strong>","url":"https://www.navidrome.org/docs/","description":"Navidrome uses <strong>under 100 MB</strong> of memory."},{"title":"bad","url":"javascript:alert(1)","description":"x"}]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer fake.Close()
+	c, cfg := setupWith(t, func(cfg *config.Config) {
+		cfg.AI.GeminiURL = fake.URL + "/gemini"
+		cfg.AI.MistralURL = fake.URL + "/mistral"
+		cfg.AI.BraveURL = fake.URL + "/brave"
+	})
+	c.do("POST", "/api/setup", map[string]string{"token": token(t, cfg), "username": "admin", "password": "correct-horse-1"}, nil)
+
+	if _, out := c.do("GET", "/api/ai/config", nil, nil); out["configured"] != false || out["enabled"] != true {
+		t.Fatalf("fresh config = %v", out)
+	}
+	chat := map[string]any{"model": "gemini:gemini-test-flash", "messages": []map[string]string{{"role": "user", "content": "How much memory does Navidrome need?"}}, "search": true}
+	if code, _ := c.do("POST", "/api/ai/chat", chat, nil); code != http.StatusPreconditionFailed {
+		t.Fatalf("chat without keys = %d", code)
+	}
+	keys := map[string]any{"keys": map[string]string{"gemini": "gem-secret-key-1234", "mistral": "mis-secret-key-5678", "brave": "brave-secret-9999"}}
+	if code, out := c.do("PUT", "/api/ai/config", keys, nil); code != 200 || out["configured"] != true {
+		t.Fatalf("save keys = %d %v", code, out)
+	}
+	res, _ := c.http.Get(c.base + "/api/ai/config")
+	raw, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if strings.Contains(string(raw), "secret") || !strings.Contains(string(raw), "••••1234") {
+		t.Fatalf("config leaks or lacks the key hint: %s", raw)
+	}
+	if code, _ := c.do("GET", "/api/state/aichat", nil, nil); code != 404 {
+		t.Fatalf("keys readable through the state API: %d", code)
+	}
+
+	_, out := c.do("GET", "/api/ai/models", nil, nil)
+	var ids []string
+	for _, m := range out["models"].([]any) {
+		ids = append(ids, m.(map[string]any)["id"].(string))
+	}
+	if strings.Join(ids, ",") != "gemini:gemini-test-flash,mistral:mistral-small-latest" {
+		t.Fatalf("models = %v (errors %v)", ids, out["errors"])
+	}
+
+	b, _ := json.Marshal(chat)
+	req, _ := http.NewRequest("POST", c.base+"/api/ai/chat", bytes.NewReader(b))
+	req.Header.Set("X-Ultraspace", "1")
+	req.Header.Set("Content-Type", "application/json")
+	res, err := c.http.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	s := string(stream)
+	if res.StatusCode != 200 || !strings.Contains(s, "event: sources") || !strings.Contains(s, `"text":"Hel"`) ||
+		!strings.Contains(s, `"text":"lo [1]"`) || !strings.Contains(s, "event: done") || strings.Contains(s, "javascript:") {
+		t.Fatalf("stream = %d %q", res.StatusCode, s)
+	}
+	if gotAuth != "Bearer gem-secret-key-1234" || gotSearchKey != "brave-secret-9999" {
+		t.Fatalf("upstream auth = %q / %q", gotAuth, gotSearchKey)
+	}
+	if len(gotMessages) != 3 || gotMessages[1]["role"] != "system" || !strings.Contains(gotMessages[1]["content"], "under 100 MB") ||
+		strings.Contains(gotMessages[1]["content"], "<strong>") {
+		t.Fatalf("prompt sent upstream = %v", gotMessages)
+	}
+
+	id := "0123456789abcdef"
+	conv := map[string]any{"title": "Navidrome memory", "model": "gemini:gemini-test-flash", "messages": []map[string]string{{"role": "user", "content": "hi"}, {"role": "assistant", "content": "Hello"}}}
+	if code, _ := c.do("PUT", "/api/ai/conversations/"+id, conv, nil); code != 200 {
+		t.Fatalf("save conversation = %d", code)
+	}
+	if _, out := c.do("GET", "/api/ai/conversations", nil, nil); len(out["conversations"].([]any)) != 1 {
+		t.Fatalf("list = %v", out)
+	}
+	if _, out := c.do("GET", "/api/ai/conversations/"+id, nil, nil); len(out["messages"].([]any)) != 2 || out["title"] != "Navidrome memory" {
+		t.Fatalf("get = %v", out)
+	}
+	if code, _ := c.do("GET", "/api/ai/conversations/..%2f..%2fetc", nil, nil); code != 400 && code != 404 {
+		t.Fatalf("bad id = %d", code)
+	}
+	c.do("DELETE", "/api/ai/conversations/"+id, nil, nil)
+	if _, out := c.do("GET", "/api/ai/conversations", nil, nil); len(out["conversations"].([]any)) != 0 {
+		t.Fatalf("after delete = %v", out)
 	}
 }

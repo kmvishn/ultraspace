@@ -6,6 +6,7 @@ import {
 import { initWM, allApps, openApp, openFile, windowsOf, focusedWindow, closeAllWindows } from './wm.js';
 import { stopSession } from './session.js';
 import { startEvents, stopEvents, togglePanel } from './clipboard.js';
+import { startChatbot, stopChatbot } from './chatbot.js';
 import { webTarget } from './apps/browser.js';
 
 export const WALLPAPERS = [
@@ -104,6 +105,8 @@ export function buildDesktop(user, { onSignOut }) {
   cleanup.push(() => removeEventListener('keydown', onKey));
   cleanup.push(() => { stopSession(); stopEvents(); closeAllWindows(); });
   startEvents();
+  startChatbot();
+  cleanup.push(() => stopChatbot());
   system.start();
   cleanup.push(() => system.stop());
   return root;

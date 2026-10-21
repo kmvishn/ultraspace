@@ -1,6 +1,7 @@
 import { h, icon, api, toast, report, confirmDialog, dialog, settings, system, on, fmtBytes, fmtDuration, fmtAgo, fmtDate, baseOf, fileUrl, emit } from '../core.js';
 import { deviceName } from '../session.js';
 import { patternPad } from '../pattern.js';
+import { chatbotConfigChanged } from '../chatbot.js';
 import { registerApp, openApp } from '../wm.js';
 import { WALLPAPERS, ACCENTS } from '../desktop.js';
 
@@ -13,6 +14,7 @@ const SECTIONS = [
   { id: 'appearance', label: 'Appearance', icon: 'palette' },
   { id: 'account', label: 'Account', icon: 'user' },
   { id: 'devices', label: 'Devices', icon: 'laptop' },
+  { id: 'chatbot', label: 'Ultra Chat Bot', icon: 'sparkles' },
   { id: 'about', label: 'About', icon: 'info' },
 ];
 
@@ -28,7 +30,7 @@ function mountSettings(win, args) {
     if (off) { off(); off = null; }
     nav.replaceChildren(...SECTIONS.map((s) => h('button', { class: `side-item ${s.id === id ? 'active' : ''}`, onclick: () => show(s.id) }, icon(s.icon, 16), h('span', null, s.label))));
     win.setTitle(`Settings — ${SECTIONS.find((s) => s.id === id).label}`);
-    off = { appearance, account, devices, about }[id](main) || null;
+    off = { appearance, account, devices, chatbot, about }[id](main) || null;
   };
   show(args.restore?.section || args.section || 'appearance');
   return {
@@ -228,6 +230,52 @@ function mountSettings(win, args) {
     load();
     timer = setInterval(load, 30_000);
     return () => clearInterval(timer);
+  }
+
+  // ---------- Ultra Chat Bot ----------
+
+  function chatbot(el) {
+    const KEYS = {
+      gemini: { label: 'Gemini API key', where: 'aistudio.google.com/apikey' },
+      mistral: { label: 'Mistral API key', where: 'console.mistral.ai → API keys' },
+      brave: { label: 'Brave Search API key (optional, for web search)', where: 'api-dashboard.search.brave.com' },
+    };
+    const render = async () => {
+      let c;
+      try { c = await api('GET', '/api/ai/config'); } catch (err) { report(err); return; }
+      chatbotConfigChanged(c);
+      const all = [...c.providers, c.search];
+      const toggle = h('label', { class: 'switch-row' },
+        h('span', null, h('b', null, 'Show the chat bubble'), h('span', { class: 'set-desc' }, 'A floating Ultra Chat Bot button at the bottom-right. Ctrl+J opens it.')),
+        h('input', { type: 'checkbox', class: 'switch', checked: c.enabled, onchange: async (e) => { await api('PUT', '/api/ai/config', { enabled: e.target.checked }).catch(report); render(); } }));
+      const rows = all.map((p) => {
+        const meta = KEYS[p.id] || { label: `${p.name} key`, where: '' };
+        const input = h('input', { class: 'input', type: 'password', placeholder: p.configured ? `Saved (${p.hint}) — paste a new key to replace` : 'Paste the key', autocomplete: 'off', spellcheck: 'false' });
+        const save = async () => {
+          if (!input.value.trim()) return;
+          try { await api('PUT', '/api/ai/config', { keys: { [p.id]: input.value.trim() } }); toast(`${p.name} key saved`); render(); } catch (err) { report(err); }
+        };
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+        return h('div', { class: 'ai-key' },
+          h('label', { class: 'field-label' }, meta.label, p.configured ? h('span', { class: 'pill active' }, `saved ${p.hint}`) : null),
+          h('div', { class: 'ai-key-row' }, input,
+            h('button', { class: 'btn primary small', onclick: save }, 'Save'),
+            p.configured ? h('button', {
+              class: 'btn small', onclick: async () => {
+                if (!(await confirmDialog(`Remove the ${p.name} key?`, 'It is deleted from the server.', 'Remove'))) return;
+                await api('PUT', '/api/ai/config', { keys: { [p.id]: '' } }).catch(report);
+                render();
+              },
+            }, 'Remove') : null),
+          meta.where ? h('div', { class: 'set-desc' }, `Get one at ${meta.where}`) : null);
+      });
+      el.replaceChildren(h('div', { class: 'settings-page' },
+        group('Ultra Chat Bot', 'Chat with Gemini or Mistral models from anywhere on the desktop. Keys are stored on your server and never sent to the browser; the server talks to the provider for you.', toggle),
+        group('API keys', null, h('div', { class: 'ai-keys' }, rows)),
+        group('Privacy', 'What you type, and any window you choose to include, is sent to the provider of the model you pick (Google or Mistral). With web search on, your question also goes to Brave.')));
+    };
+    render();
+    return null;
   }
 
   function about(el) {

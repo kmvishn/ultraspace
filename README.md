@@ -290,6 +290,23 @@ ultraspace ships no stream addons. Only install addons you trust and only watch 
   delete. Upload with the button or by dropping files on the window (they go to **Files → Photos**).
 - Long timelines render in pages as you scroll.
 
+### Ultra Chat Bot
+
+A floating ✨ bubble at the bottom-right (Ctrl+J) opens a chat with hosted models.
+
+- **Models:** Gemini and Mistral, through their OpenAI-compatible APIs. The model list is fetched live from each
+  provider (chat models only; dated aliases folded into `-latest`), so new models appear on their own.
+- **Keys stay on the server:** paste them in Settings → Ultra Chat Bot. The server stores them, calls the
+  provider and streams the answer back; the browser only ever sees `saved ••••abcd`.
+- **Web search (optional):** with a Brave Search API key, the 🌐 Web chip looks the question up first, gives the
+  top results to the model and shows the sources under the answer, cited like [1].
+- **Context:** "Include" sends what the focused window shows (the open note, the editor's file or selection, the
+  last screenfuls of the Terminal) along with your question.
+- Answers stream in with a stop button, Markdown and code blocks with copy buttons; conversations are saved on
+  the server (newest 200) and appear on every device. Settings can hide the bubble entirely.
+- Privacy: your messages, and anything you include, go to the provider of the model you pick (and your question
+  to Brave when web search is on).
+
 ### Shared clipboard
 
 - The clipboard icon in the menu bar holds text shared between all your devices. Send what you type or paste;
@@ -756,6 +773,7 @@ All endpoints except setup, login, logout and health need a session cookie. Non-
 | Navidrome | `GET /api/navidrome`, `POST /api/navidrome/{connect,disconnect}`, `GET /api/navidrome/rest/{method}` |
 | Photos | `GET /api/files/photos`, `GET /api/files/thumb?path=&size=256\|512` (images and videos) |
 | Videos | `GET /api/files/probe`, `GET /api/files/stream?path=&t=&audio=&mode=&h=`, `GET /api/files/subtitle` |
+| Ultra Chat Bot | `GET/PUT /api/ai/config`, `GET /api/ai/models`, `POST /api/ai/chat` (Server-Sent Events), `GET /api/ai/conversations`, `GET/PUT/DELETE /api/ai/conversations/{id}` |
 | Clipboard | `GET/POST/DELETE /api/clipboard`, `DELETE /api/clipboard/{id}`, `GET /api/events` (Server-Sent Events) |
 | Torrents | `GET/POST /api/torrents`, `GET /api/torrents/{hash}`, `POST /api/torrents/{hash}/{pause,resume,remove,delete}`, `PUT /api/torrents/{hash}/files` |
 | Media sources | `GET /api/media/raw?src=` (`torrent:<hash>:<file>` or `url:<address>`); probe, stream and subtitle accept `src=` instead of `path=` |

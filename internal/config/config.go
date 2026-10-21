@@ -30,6 +30,7 @@ type Config struct {
 	// AgentSocket is where the Terminal and VS Code service (ultraspace agent) listens.
 	AgentSocket string  `toml:"agent_socket"`
 	Torrent     Torrent `toml:"torrent"`
+	AI          AI      `toml:"ai"`
 }
 
 // Torrent configures the BitTorrent client behind the Torrents and Stremio apps.
@@ -43,6 +44,14 @@ type Torrent struct {
 	// SeedRatio stops uploading a finished torrent at this upload/size ratio.
 	// 0 = do not seed at all, -1 = seed for as long as ultraspace runs.
 	SeedRatio float64 `toml:"seed_ratio"`
+}
+
+// AI configures Ultra Chat Bot. The API keys themselves are entered in Settings and
+// kept in the database; these only override the services' addresses.
+type AI struct {
+	GeminiURL  string `toml:"gemini_url"`  // OpenAI-compatible root; default Google's
+	MistralURL string `toml:"mistral_url"` // default https://api.mistral.ai/v1
+	BraveURL   string `toml:"brave_url"`   // web search endpoint; default Brave's
 }
 
 // Browser configures the remote Chrome behind the Browser app.

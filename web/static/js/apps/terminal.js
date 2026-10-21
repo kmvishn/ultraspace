@@ -244,7 +244,17 @@ function mountTerminal(win, args) {
 
   start();
 
+  // The last screenfuls of the active terminal, for "explain this error".
+  function context() {
+    if (!active) return null;
+    const buf = active.term.buffer.active;
+    const lines = [];
+    for (let i = Math.max(0, buf.length - 120); i < buf.length; i++) lines.push(buf.getLine(i)?.translateToString(true) ?? '');
+    return { title: active.title, text: lines.join('\n').trim() };
+  }
+
   return {
+    context,
     onFocus() { active?.term.focus(); },
     onResize: refit,
     async onClose() {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"ultraspace/internal/agent"
+	"ultraspace/internal/aichat"
 	"ultraspace/internal/auth"
 	"ultraspace/internal/browser"
 	"ultraspace/internal/clip"
@@ -121,6 +122,11 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 	sources.Register(mux, a.Require)
 	dl.Register(mux, a.Require)
 	stremio.New(st, log).Register(mux, a.Require)
+	chatbot := aichat.New(st, aiProviders(cfg.AI), log)
+	if cfg.AI.BraveURL != "" {
+		chatbot.SearchURL = cfg.AI.BraveURL
+	}
+	chatbot.Register(mux, a.Require)
 	if tm != nil {
 		tm.Register(mux, a.Require)
 	} else {
@@ -149,6 +155,20 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 
 	h := securityHeaders(csrf(cfg.PublicOrigin, proxy, logRequests(log, mux)))
 	return h, cleanup, nil
+}
+
+// aiProviders applies any address overrides from the config to the default providers.
+func aiProviders(c config.AI) []aichat.Provider {
+	ps := aichat.DefaultProviders()
+	for i := range ps {
+		switch {
+		case ps[i].ID == "gemini" && c.GeminiURL != "":
+			ps[i].Base = strings.TrimRight(c.GeminiURL, "/")
+		case ps[i].ID == "mistral" && c.MistralURL != "":
+			ps[i].Base = strings.TrimRight(c.MistralURL, "/")
+		}
+	}
+	return ps
 }
 
 // Run serves until ctx is cancelled, then shuts down gracefully.
