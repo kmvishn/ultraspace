@@ -1,5 +1,5 @@
 import { h, icon, api, on, settings, ApiError } from './core.js';
-import { buildDesktop, applyAppearance } from './desktop.js';
+import { buildDesktop, applyAppearance, teardownDesktop } from './desktop.js';
 import { startSession, flushSession, stopSession } from './session.js';
 import { stopEvents } from './clipboard.js';
 import { patternPad } from './pattern.js';
@@ -44,6 +44,8 @@ async function signOut() {
   await flushSession();
   stopSession();
   stopEvents();
+  teardownDesktop(); // close every window: music stops, terminals and the browser disconnect
+  await new Promise((r) => setTimeout(r, 300)); // let apps' last saves go out
   await api('POST', '/api/logout').catch(() => {});
   user = null;
   window.ultraspaceUser = null;
@@ -51,7 +53,7 @@ async function signOut() {
 }
 
 on('signout', signOut);
-on('unauthorized', () => { if (user) { user = null; stopSession(); stopEvents(); boot(); } });
+on('unauthorized', () => { if (user) { user = null; stopSession(); stopEvents(); teardownDesktop(); boot(); } });
 
 function lockScreen(mode) {
   const bg = h('div', { class: 'lock' });

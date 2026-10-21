@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"ultraspace/internal/auth"
 	"ultraspace/internal/config"
 )
 
@@ -1127,5 +1128,36 @@ func TestUltraChat(t *testing.T) {
 	c.do("DELETE", "/api/ai/conversations/"+id, nil, nil)
 	if _, out := c.do("GET", "/api/ai/conversations", nil, nil); len(out["conversations"].([]any)) != 0 {
 		t.Fatalf("after delete = %v", out)
+	}
+}
+
+// Signing a device out ends the live connections it already has open.
+func TestRevokedSessionClosesLiveConnections(t *testing.T) {
+	old := auth.SessionCheckEvery
+	auth.SessionCheckEvery = 100 * time.Millisecond
+	defer func() { auth.SessionCheckEvery = old }()
+	c, cfg := setup(t)
+	c.do("POST", "/api/setup", map[string]string{"token": token(t, cfg), "username": "admin", "password": "correct-horse-1"}, nil)
+
+	jar, _ := cookiejar.New(nil)
+	laptop := &client{t: t, base: c.base, http: &http.Client{Jar: jar}}
+	laptop.do("POST", "/api/login", map[string]string{"username": "admin", "password": "correct-horse-1"}, map[string]string{"User-Agent": "Laptop/1"})
+	res, err := laptop.http.Get(c.base + "/api/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan struct{})
+	go func() { io.Copy(io.Discard, res.Body); close(ended) }()
+
+	_, out := c.do("GET", "/api/account/sessions", nil, nil)
+	for _, s := range out["sessions"].([]any) {
+		if m := s.(map[string]any); m["user_agent"] == "Laptop/1" {
+			c.do("POST", "/api/account/sessions/revoke", map[string]any{"id": m["id"]}, nil)
+		}
+	}
+	select {
+	case <-ended:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the revoked device's live stream stayed open")
 	}
 }
