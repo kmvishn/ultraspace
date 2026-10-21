@@ -763,7 +763,13 @@ function mountMusic(win, args) {
       audio.removeAttribute('src');
       audio.load();
       emit('music', null);
-      if ('mediaSession' in navigator) navigator.mediaSession.metadata = null;
+      if ('mediaSession' in navigator) {
+        // Media keys and lock-screen controls must not drive a closed player.
+        for (const a of ['play', 'pause', 'nexttrack', 'previoustrack', 'seekbackward', 'seekforward']) {
+          try { navigator.mediaSession.setActionHandler(a, null); } catch { /* unsupported action */ }
+        }
+        navigator.mediaSession.metadata = null;
+      }
     },
   };
 }

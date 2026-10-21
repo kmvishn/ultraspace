@@ -227,8 +227,41 @@ func (a *Auth) Require(next http.Handler) http.Handler {
 		}
 		ctx := context.WithValue(r.Context(), ctxKey{}, u)
 		ctx = context.WithValue(ctx, sessionKey{}, sess)
+		// A long-lived connection (terminal, VS Code, remote browser, live events, a stream)
+		// ends when its session does: signing a device out cuts what it has open.
+		if longLived(r) {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithCancel(ctx)
+			defer cancel()
+			go a.watchSession(ctx, cancel, hashToken(c.Value))
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// SessionCheckEvery is how often long-lived connections re-check their session.
+var SessionCheckEvery = 15 * time.Second
+
+func longLived(r *http.Request) bool {
+	return r.Header.Get("Upgrade") != "" ||
+		strings.Contains(r.Header.Get("Accept"), "text/event-stream") ||
+		r.URL.Path == "/api/events" || r.URL.Path == "/api/ai/chat" || r.URL.Path == "/api/files/stream"
+}
+
+func (a *Auth) watchSession(ctx context.Context, cancel context.CancelFunc, tokenHash []byte) {
+	t := time.NewTicker(SessionCheckEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if _, _, err := a.store.SessionUser(ctx, tokenHash); errors.Is(err, store.ErrNotFound) {
+			cancel()
+			return
+		}
+	}
 }
 
 // PurgeLoop removes expired sessions until ctx is done.

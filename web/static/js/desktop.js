@@ -46,9 +46,16 @@ media.addEventListener('change', () => applyAppearance(document.querySelector('.
 
 let cleanup = [];
 
-export function buildDesktop(user, { onSignOut }) {
-  cleanup.forEach((fn) => fn());
+// teardownDesktop closes every window and stops everything the desktop runs (polling,
+// live events, the chat bubble). Signing out calls it while still signed in, so apps
+// can save and close their connections.
+export function teardownDesktop() {
+  cleanup.forEach((fn) => { try { fn(); } catch (err) { console.error(err); } });
   cleanup = [];
+}
+
+export function buildDesktop(user, { onSignOut }) {
+  teardownDesktop();
 
   const root = h('div', { class: 'desktop' });
   const windowsLayer = h('div', { class: 'windows' });

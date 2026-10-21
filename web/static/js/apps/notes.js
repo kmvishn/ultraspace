@@ -337,7 +337,10 @@ function mountNotes(win, args) {
   return {
     onArgs(a) { if (a.path) open(a.path); },
     async onClose() { await flush(); return true; },
-    onDestroy() { document.removeEventListener('visibilitychange', onVisible); },
+    onDestroy() {
+      document.removeEventListener('visibilitychange', onVisible);
+      save(); // a last autosave still pending (signing out closes windows without asking)
+    },
     onFocus() { checkElsewhere(); },
     saveState: () => ({ path: current?.path || null }),
     context: () => (current ? { title: noteName(current.path), text: area.value } : null),
