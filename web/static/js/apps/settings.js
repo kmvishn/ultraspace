@@ -238,6 +238,8 @@ function mountSettings(win, args) {
     const KEYS = {
       gemini: { label: 'Gemini API key', where: 'aistudio.google.com/apikey' },
       mistral: { label: 'Mistral API key', where: 'console.mistral.ai → API keys' },
+      groq: { label: 'Groq API key', where: 'console.groq.com/keys (free tier, very fast)' },
+      openrouter: { label: 'OpenRouter API key', where: 'openrouter.ai/keys (only its free models are listed)' },
       brave: { label: 'Brave Search API key (optional, for web search)', where: 'api-dashboard.search.brave.com' },
     };
     const render = async () => {
@@ -270,9 +272,9 @@ function mountSettings(win, args) {
           meta.where ? h('div', { class: 'set-desc' }, `Get one at ${meta.where}`) : null);
       });
       el.replaceChildren(h('div', { class: 'settings-page' },
-        group('Ultra Chat Bot', 'Chat with Gemini or Mistral models from anywhere on the desktop. Keys are stored on your server and never sent to the browser; the server talks to the provider for you.', toggle),
+        group('Ultra Chat Bot', 'Chat with Gemini, Mistral, Groq or OpenRouter models from anywhere on the desktop. Keys are stored on your server and never sent to the browser; the server talks to the provider for you.', toggle),
         group('API keys', null, h('div', { class: 'ai-keys' }, rows)),
-        group('Privacy', 'What you type, and any window you choose to include, is sent to the provider of the model you pick (Google or Mistral). With web search on, your question also goes to Brave.')));
+        group('Privacy', 'What you type, and any window you choose to include, is sent to the provider of the model you pick (Google, Mistral, Groq or OpenRouter, which passes it on to the model’s host). With web search on, your question also goes to Brave.')));
     };
     render();
     return null;

@@ -1025,6 +1025,10 @@ func TestUltraChat(t *testing.T) {
 			io.WriteString(w, `{"data":[{"id":"models/gemini-test-flash"},{"id":"models/text-embedding-004"}]}`)
 		case "/mistral/models":
 			io.WriteString(w, `{"data":[{"id":"mistral-small-latest","capabilities":{"completion_chat":true}},{"id":"mistral-embed","capabilities":{"completion_chat":false}}]}`)
+		case "/groq/models":
+			io.WriteString(w, `{"data":[{"id":"llama-3.3-70b-versatile","active":true},{"id":"whisper-large-v3","active":true},{"id":"meta-llama/llama-guard-4-12b"},{"id":"old-model","active":false}]}`)
+		case "/openrouter/models":
+			io.WriteString(w, `{"data":[{"id":"deepseek/deepseek-r1:free"},{"id":"openai/gpt-5"}]}`)
 		case "/gemini/chat/completions":
 			gotAuth = r.Header.Get("Authorization")
 			var body struct {
@@ -1054,6 +1058,8 @@ func TestUltraChat(t *testing.T) {
 	c, cfg := setupWith(t, func(cfg *config.Config) {
 		cfg.AI.GeminiURL = fake.URL + "/gemini"
 		cfg.AI.MistralURL = fake.URL + "/mistral"
+		cfg.AI.GroqURL = fake.URL + "/groq"
+		cfg.AI.OpenRouterURL = fake.URL + "/openrouter"
 		cfg.AI.BraveURL = fake.URL + "/brave"
 	})
 	c.do("POST", "/api/setup", map[string]string{"token": token(t, cfg), "username": "admin", "password": "correct-horse-1"}, nil)
@@ -1065,7 +1071,7 @@ func TestUltraChat(t *testing.T) {
 	if code, _ := c.do("POST", "/api/ai/chat", chat, nil); code != http.StatusPreconditionFailed {
 		t.Fatalf("chat without keys = %d", code)
 	}
-	keys := map[string]any{"keys": map[string]string{"gemini": "gem-secret-key-1234", "mistral": "mis-secret-key-5678", "brave": "brave-secret-9999"}}
+	keys := map[string]any{"keys": map[string]string{"gemini": "gem-secret-key-1234", "mistral": "mis-secret-key-5678", "groq": "gsk-secret-1111", "openrouter": "or-secret-2222", "brave": "brave-secret-9999"}}
 	if code, out := c.do("PUT", "/api/ai/config", keys, nil); code != 200 || out["configured"] != true {
 		t.Fatalf("save keys = %d %v", code, out)
 	}
@@ -1084,7 +1090,7 @@ func TestUltraChat(t *testing.T) {
 	for _, m := range out["models"].([]any) {
 		ids = append(ids, m.(map[string]any)["id"].(string))
 	}
-	if strings.Join(ids, ",") != "gemini:gemini-test-flash,mistral:mistral-small-latest" {
+	if strings.Join(ids, ",") != "gemini:gemini-test-flash,mistral:mistral-small-latest,groq:llama-3.3-70b-versatile,openrouter:deepseek/deepseek-r1:free" {
 		t.Fatalf("models = %v (errors %v)", ids, out["errors"])
 	}
 
