@@ -14,6 +14,7 @@ const SECTIONS = [
   { id: 'appearance', label: 'Appearance', icon: 'palette' },
   { id: 'sound', label: 'Sound & Audio', icon: 'volume' },
   { id: 'network', label: 'Network', icon: 'wifi' },
+  { id: 'sinkhole', label: 'DNS Sinkhole (AdBlock)', icon: 'shield' },
   { id: 'hardware', label: 'Bluetooth & Hardware', icon: 'bluetooth' },
   { id: 'account', label: 'Account', icon: 'user' },
   { id: 'devices', label: 'Devices', icon: 'laptop' },
@@ -33,7 +34,7 @@ function mountSettings(win, args) {
     if (off) { off(); off = null; }
     nav.replaceChildren(...SECTIONS.map((s) => h('button', { class: `side-item ${s.id === id ? 'active' : ''}`, onclick: () => show(s.id) }, icon(s.icon, 16), h('span', null, s.label))));
     win.setTitle(`Settings — ${SECTIONS.find((s) => s.id === id).label}`);
-    off = { appearance, sound, network, hardware, account, devices, chatbot, about }[id](main) || null;
+    off = { appearance, sound, network, sinkhole, hardware, account, devices, chatbot, about }[id](main) || null;
   };
   show(args.restore?.section || args.section || 'appearance');
   return {
@@ -452,6 +453,201 @@ function mountSettings(win, args) {
     loadStatus();
     scan();
     timer = setInterval(() => { loadStatus(); }, 15_000);
+    return () => clearInterval(timer);
+  }
+
+  function sinkhole(el) {
+    const toggleBox = h('div', { class: 'device-list' }, h('div', { class: 'empty-state small' }, 'Checking DNS Sinkhole…'));
+    const statsGrid = h('div', { class: 'stat-grid' });
+    const rulesBox = h('div', { class: 'set-form' });
+    const queriesBox = h('div', { class: 'device-list' }, h('div', { class: 'empty-state small' }, 'No queries recorded yet.'));
+    let timer = null;
+    let localIP = 'this server’s IP';
+
+    async function loadStatus() {
+      try {
+        const [st, netSt, qRes] = await Promise.all([
+          api('GET', '/api/sinkhole/status'),
+          api('GET', '/api/network/status').catch(() => null),
+          api('GET', '/api/sinkhole/queries').catch(() => ({ queries: [] })),
+        ]);
+
+        if (netSt && netSt.interfaces) {
+          const iface = netSt.interfaces.find((i) => i.ip && !i.ip.startsWith('127.'));
+          if (iface) localIP = iface.ip.split('/')[0];
+        }
+
+        // 1. Toggle switch & status
+        const toggleSwitch = h('input', {
+          type: 'checkbox',
+          checked: !!st.enabled,
+          onchange: async (e) => {
+            const enabled = e.target.checked;
+            try {
+              const res = await api('POST', '/api/sinkhole/toggle', { enabled });
+              if (res.ok) {
+                toast(enabled ? 'DNS Sinkhole AdBlocker activated' : 'DNS Sinkhole AdBlocker deactivated');
+              } else if (res.error) {
+                toast(res.error, 'error');
+              }
+            } catch (err) {
+              report(err);
+            }
+            await loadStatus();
+          },
+        });
+
+        toggleBox.replaceChildren(
+          h('div', { class: 'device' },
+            h('span', { class: 'device-icon' }, icon(st.enabled ? 'shield' : 'shieldOff', 22)),
+            h('div', { class: 'device-text' },
+              h('div', { class: 'device-name' },
+                'DNS Sinkhole AdBlocker',
+                st.enabled
+                  ? h('span', { class: 'pill active' }, st.listening ? `Listening on port ${st.port}` : 'Active')
+                  : h('span', { class: 'pill' }, 'Disabled')
+              ),
+              h('div', { class: 'set-desc' },
+                st.enabled
+                  ? `To block ads across your home network: set your router or phone's Primary DNS server to ${localIP} (port ${st.port}).`
+                  : 'Turn on to block advertising, trackers, and telemetry network-wide on all connected devices.'
+              )
+            ),
+            h('label', { class: 'toggle' }, toggleSwitch, h('span', { class: 'slider' }))
+          )
+        );
+
+        // 2. Stats cards
+        const stats = st.stats || {};
+        const statCard = (label, val, sub) => h('div', {
+          class: 'stat-card',
+          style: { padding: '14px', background: 'var(--card-bg, rgba(255,255,255,0.04))', borderRadius: 'var(--r-md)', border: '1px solid var(--border)' },
+        },
+          h('div', { class: 'set-desc', style: { marginBottom: '4px' } }, label),
+          h('div', { style: { fontSize: '24px', fontWeight: '700', color: 'var(--text)' } }, String(val)),
+          sub ? h('div', { class: 'set-desc', style: { marginTop: '4px', fontSize: '11px' } }, sub) : null
+        );
+
+        statsGrid.style.display = 'grid';
+        statsGrid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(130px, 1fr))';
+        statsGrid.style.gap = '10px';
+
+        statsGrid.replaceChildren(
+          statCard('Total Queries', stats.total_queries || 0),
+          statCard('Ads Blocked', stats.blocked_queries || 0),
+          statCard('Block Ratio', `${(st.percent_blocked || 0).toFixed(1)}%`),
+          statCard('Active Rules', (st.rule_count || 0) + (st.blacklist_count || 0), `${st.rule_count || 0} built-in`)
+        );
+
+        // 3. Custom rules
+        const addDomain = async (action, domainInput) => {
+          const d = domainInput.value.trim();
+          if (!d) return;
+          try {
+            await api('POST', '/api/sinkhole/rules', { action, domain: d });
+            toast(`Rule added for ${d}`);
+            domainInput.value = '';
+            await loadStatus();
+          } catch (err) {
+            report(err);
+          }
+        };
+
+        const removeDomain = async (action, domain) => {
+          try {
+            await api('POST', '/api/sinkhole/rules', { action, domain });
+            toast(`Rule removed for ${domain}`);
+            await loadStatus();
+          } catch (err) {
+            report(err);
+          }
+        };
+
+        const wlInput = h('input', { class: 'input', placeholder: 'e.g. googleadservices.com' });
+        const blInput = h('input', { class: 'input', placeholder: 'e.g. tracking.site.com' });
+
+        const wlList = (st.whitelist || []).map((d) => h('div', { class: 'side-item', style: { justifyContent: 'space-between', height: '28px' } },
+          h('span', null, d),
+          h('button', { class: 'icon-btn', style: { padding: '2px' }, onclick: () => removeDomain('remove_whitelist', d) }, icon('x', 12))
+        ));
+
+        const blList = (st.blacklist || []).map((d) => h('div', { class: 'side-item', style: { justifyContent: 'space-between', height: '28px' } },
+          h('span', null, d),
+          h('button', { class: 'icon-btn', style: { padding: '2px' }, onclick: () => removeDomain('remove_blacklist', d) }, icon('x', 12))
+        ));
+
+        const updateBtn = h('button', {
+          class: 'btn small',
+          onclick: async () => {
+            updateBtn.disabled = true;
+            try {
+              await api('POST', '/api/sinkhole/update');
+              toast('Updating blocklists in background…');
+            } catch (err) {
+              report(err);
+            } finally {
+              updateBtn.disabled = false;
+            }
+          },
+        }, icon('download', 14), 'Update StevenBlack Blocklist');
+
+        rulesBox.replaceChildren(
+          h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' } },
+            h('div', null,
+              h('div', { class: 'side-title', style: { paddingLeft: '0' } }, 'Custom Whitelist (Allowed)'),
+              h('div', { style: { display: 'flex', gap: '6px', marginBottom: '8px' } },
+                wlInput,
+                h('button', { class: 'btn small', onclick: () => addDomain('add_whitelist', wlInput) }, 'Add')
+              ),
+              h('div', { class: 'side-list' }, wlList.length ? wlList : h('div', { class: 'set-desc' }, 'No whitelisted domains.'))
+            ),
+            h('div', null,
+              h('div', { class: 'side-title', style: { paddingLeft: '0' } }, 'Custom Blacklist (Blocked)'),
+              h('div', { style: { display: 'flex', gap: '6px', marginBottom: '8px' } },
+                blInput,
+                h('button', { class: 'btn small primary', onclick: () => addDomain('add_blacklist', blInput) }, 'Add')
+              ),
+              h('div', { class: 'side-list' }, blList.length ? blList : h('div', { class: 'set-desc' }, 'No custom blacklisted domains.'))
+            )
+          ),
+          h('div', { style: { marginTop: '16px' } }, updateBtn)
+        );
+
+        // 4. Queries log
+        const queries = qRes.queries || [];
+        if (queries.length === 0) {
+          queriesBox.replaceChildren(h('div', { class: 'empty-state small' }, 'No DNS queries recorded yet. Send queries to this device to see live logs.'));
+        } else {
+          queriesBox.replaceChildren(...queries.slice(0, 30).map((q) => {
+            const timeStr = q.time ? new Date(q.time).toLocaleTimeString() : '';
+            return h('div', { class: 'device' },
+              h('span', { class: 'device-icon' }, icon(q.blocked ? 'shieldOff' : 'check', 16)),
+              h('div', { class: 'device-text' },
+                h('div', { class: 'device-name' },
+                  q.domain,
+                  q.blocked
+                    ? h('span', { class: 'pill danger', style: { background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' } }, 'Blocked')
+                    : h('span', { class: 'pill' }, 'Allowed')
+                ),
+                h('div', { class: 'set-desc' }, `${q.type || 'A'} query from ${q.client} · ${q.duration_ms}ms · ${timeStr}`)
+              )
+            );
+          }));
+        }
+      } catch (err) {
+        report(err);
+      }
+    }
+
+    el.replaceChildren(h('div', { class: 'settings-page' },
+      group('DNS Sinkhole & AdBlocker', 'Block ads, tracking, and telemetry network-wide on all connected devices.', toggleBox),
+      group('Activity & Statistics', 'Real-time metrics for network DNS queries.', statsGrid),
+      group('Rules & Filtering', 'Manage custom whitelisted and blacklisted domain names.', rulesBox),
+      group('Recent DNS Queries', 'Live log of domain lookup requests processed by Ultraspace.', queriesBox)
+    ));
+
+    loadStatus();
+    timer = setInterval(loadStatus, 5_000);
     return () => clearInterval(timer);
   }
 

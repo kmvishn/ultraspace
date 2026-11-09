@@ -1179,6 +1179,7 @@ func TestHeadlessLaptopServerEndpoints(t *testing.T) {
 		"/api/audio/status",
 		"/api/power/status",
 		"/api/hardware/status",
+		"/api/sinkhole/status",
 		"/api/files/places",
 		"/api/files/drives",
 		"/api/files/stat",
@@ -1262,5 +1263,15 @@ func TestHeadlessLaptopServerEndpoints(t *testing.T) {
 		t.Fatalf("GET /api/files/stat = %d", code)
 	} else if _, ok := out["total"]; !ok {
 		t.Fatalf("stat response missing total space: %v", out)
+	}
+
+	// 6. Sinkhole / AdBlocker endpoints
+	if code, out := c.do("GET", "/api/sinkhole/status", nil, nil); code != 200 {
+		t.Fatalf("GET /api/sinkhole/status = %d", code)
+	} else if _, ok := out["rule_count"]; !ok {
+		t.Fatalf("sinkhole status missing rule_count: %v", out)
+	}
+	if code, out := c.do("POST", "/api/sinkhole/toggle", map[string]any{"enabled": false}, nil); code != 200 || out["ok"] != true {
+		t.Fatalf("POST /api/sinkhole/toggle = %d, %v", code, out)
 	}
 }

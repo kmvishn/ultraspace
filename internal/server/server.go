@@ -30,6 +30,7 @@ import (
 	"ultraspace/internal/power"
 	"ultraspace/internal/remote"
 	"ultraspace/internal/services"
+	"ultraspace/internal/sinkhole"
 	"ultraspace/internal/state"
 	"ultraspace/internal/store"
 	"ultraspace/internal/stremio"
@@ -85,7 +86,12 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 		st.Close()
 		return nil, nil, err
 	}
+	sh := sinkhole.New(filepath.Join(cfg.DataDir, "sinkhole"), log)
+	if err := sh.Start(ctx); err != nil {
+		log.Warn("sinkhole start", "err", err)
+	}
 	cleanup := func() {
+		sh.Stop()
 		rb.Shutdown()
 		dl.Close()
 		if tm != nil {
@@ -126,6 +132,7 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 	audio.New(log).Register(mux, a.Require)
 	power.New(log).Register(mux, a.Require)
 	hardware.New(log).Register(mux, a.Require)
+	sh.Register(mux, a.Require)
 	state.New(st, log).Register(mux, a.Require)
 	browser.New(log).Register(mux, a.Require)
 	rb.Register(mux, a.Require)
