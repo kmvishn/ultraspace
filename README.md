@@ -118,9 +118,12 @@ domain); title artwork from Stremio's Cinemeta. Photos and music in the demo are
 
 ### Files
 
-A file manager confined to one folder on the server.
+Native file manager with storage drive detection and Places shortcuts.
 
-- Grid with image thumbnails or a list; breadcrumbs, back / forward / up, places sidebar, storage meter.
+- **Storage Devices & Mounts**: Automatically discovers system disks, mounted partitions, attached USB flash drives, and external hard disks with live capacity meters.
+- **Full Host Filesystem or Isolated**: Configure `files_root = "/"` in `/etc/ultraspace/config.toml` for full host access, or lock it down to an isolated user directory. Built on Go 1.24's `os.Root` directory sandboxing.
+- **Places Sidebar**: Quick-access shortcuts to Home, Documents, Downloads, Music, Pictures, Videos, and root File System.
+- Grid with image thumbnails or a list; breadcrumbs, back / forward / up, places sidebar, storage meters.
 - Multi-select (Ctrl / Shift), right-click menus, keyboard shortcuts (Delete, F2, Enter, Backspace, Ctrl+A).
 - Drag files onto folders to move them; drop files from your computer to upload (with progress and speed).
 - Search across the whole library; *Set as wallpaper* for images; *Play in Music* for audio.
@@ -132,6 +135,7 @@ A file manager confined to one folder on the server.
 ### System
 
 - Live CPU, memory and network charts (history kept on the server, so the graph is full when you open it).
+- **Power & Thermals**: Live battery percentage, charging state, AC online indicator, and CPU package thermals in the top menu bar and system overview.
 - Disk usage, uptime, load, kernel and host information.
 - **Processes**: sortable, filterable, refreshed every few seconds.
 - **Services**: every systemd unit with its state, filter for failed units, and the unit's journal side by side.
@@ -316,6 +320,41 @@ A floating ✨ bubble at the bottom-right (Ctrl+J) opens a chat with hosted mode
   every other open desktop gets it **instantly** (Server-Sent Events) with a one-click *Copy*.
 - Copying in the Terminal (Ctrl+Shift+C) or in the server Browser (Ctrl+C) also goes to the shared clipboard.
 - The last 25 items are kept on the server; remove items or clear it any time.
+
+### Headless Server & Hardware Controls
+
+Built specifically to repurpose headless PCs, Intel NUCs, and old laptops (e.g. broken screen/keyboard) as silent micro-servers.
+
+- **Network & Wi-Fi Configuration** (Settings → Network & Wi-Fi):
+  - Scan for 2.4 GHz and 5 GHz Wi-Fi access points directly in the web UI.
+  - Connect to WPA2/WPA3 or Open networks, disconnect, or join hidden SSIDs.
+  - View IP addresses, gateways, DNS servers, and MAC addresses for all physical and virtual network adapters.
+- **Emergency Fallback Hotspot (`Ultraspace-Setup`)**:
+  - Built-in watchdog: if the server loses network connection for >45 seconds (e.g., moved to a new home or changed Wi-Fi password), it automatically broadcasts an emergency setup hotspot named `Ultraspace-Setup` (password: `ultraspace`).
+  - Connect your phone, browse to `http://10.42.0.1:4600`, select your Wi-Fi, and the hotspot automatically turns off as soon as connection is established.
+- **Audio Output Switcher** (Settings → Sound & Audio):
+  - Switch the server's physical audio output between the 3.5mm headphone jack, internal speakers, HDMI audio, USB DAC, or paired Bluetooth speaker.
+  - Master volume slider (0–150% boost), mute toggle, and a one-click speaker test chime.
+- **Bluetooth & Hardware Inspector** (Settings → Bluetooth & Hardware):
+  - Discover, pair, trust, connect, and disconnect nearby Bluetooth devices via BlueZ.
+  - Detailed hardware inventory: plugged-in USB peripherals (flash drives, dongles, audio interfaces) and internal PCI/GPU controllers.
+- **Headless Laptop Script (`deploy/headless-laptop-setup.sh`)**:
+  - One-command setup that disables lid-switch sleep (`HandleLidSwitch=ignore`), turns off broken panel backlight to save heat/power, sets 80% battery charge thresholds, and configures Polkit permissions.
+
+### DNS Sinkhole (Network-wide AdBlocker)
+
+An optional, high-performance RFC 1035 UDP DNS server (Pi-hole style) built directly into the Ultraspace binary.
+
+- **Ad & Tracker Blocking**: Returns `0.0.0.0` / `::` for queries targeting advertising, telemetry, and tracking root domains and wildcards, while forwarding clean requests to privacy-respecting upstreams (`1.1.1.1`, `1.0.0.1`).
+- **Web UI & Controls** (Settings → DNS Sinkhole):
+  - Master toggle switch (ON / OFF).
+  - Setup guide with your server's local LAN IP to set as your home router's DNS server.
+  - Real-time stat counters: Total Queries, Blocked Queries, Block Ratio %, and Active Rules.
+  - Live query log showing recent lookups with client IP and blocked/allowed status.
+  - Custom Whitelist and Blacklist domain management.
+- **Security & Efficiency**:
+  - **Open-Resolver Protection**: Automatically rejects queries originating from public WAN IPs to protect against DNS amplification DDoS abuse.
+  - **Zero-Allocation Socket Pooling**: High-throughput packet buffer pooling (`sync.Pool`) for sub-millisecond lookups under heavy network loads.
 
 ### Also
 
@@ -863,6 +902,12 @@ All endpoints except setup, login, logout and health need a session cookie. Non-
 | Stremio | `GET /api/stremio/defaults`, `POST /api/stremio/manifest`, `GET /api/stremio/addon`, `GET /api/stremio/img` |
 | Stremio account | `GET /api/stremio/account`, `POST /api/stremio/account/{login,logout}`, `GET/PUT /api/stremio/account/addons`, `GET/POST /api/stremio/account/library` |
 | Web downloads | `GET/POST /api/downloads`, `POST /api/downloads/{id}/{cancel,forget}` |
+| Network & Wi-Fi | `GET /api/network/status`, `GET /api/network/wifi/scan`, `POST /api/network/wifi/connect`, `POST /api/network/wifi/disconnect`, `GET/POST /api/network/hotspot` |
+| Sound & Audio | `GET /api/audio/status`, `POST /api/audio/sink`, `POST /api/audio/volume`, `POST /api/audio/mute`, `POST /api/audio/test` |
+| Bluetooth & HW | `GET /api/hardware/status`, `POST /api/hardware/bluetooth/{power,scan,connect,disconnect,pair,remove}` |
+| Power & Battery | `GET /api/power/status` |
+| DNS Sinkhole | `GET /api/sinkhole/status`, `POST /api/sinkhole/toggle`, `POST /api/sinkhole/{whitelist,blacklist}/{add,remove}`, `GET /api/sinkhole/queries` |
+| Storage & Places | `GET /api/files/drives`, `GET /api/files/places`, `GET /api/files/stat?path=` |
 | Health | `GET /api/health` |
 
 ---
