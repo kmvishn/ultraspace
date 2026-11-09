@@ -3,7 +3,7 @@ import { deviceName } from '../session.js';
 import { patternPad } from '../pattern.js';
 import { chatbotConfigChanged } from '../chatbot.js';
 import { registerApp, openApp } from '../wm.js';
-import { WALLPAPERS, ACCENTS } from '../desktop.js';
+import { WALLPAPERS, ACCENTS, lockDesktop } from '../desktop.js';
 
 registerApp({
   id: 'settings', name: 'Settings', icon: 'sliders', color: ['#94a3b8', '#475569'], width: 820, height: 600,
@@ -833,8 +833,163 @@ function mountSettings(win, args) {
         h('div', { class: 'tb-spacer' }),
         h('button', { class: 'btn', onclick: () => emit('signout') }, icon('logOut', 15), 'Sign out'))),
       group('Password', 'Changing your password signs out every other device.', form),
-      patternGroup()));
-    return null;
+      pinGroup(),
+      patternGroup(),
+      lockscreenSettingsGroup()));
+    return on('settings', () => account(el));
+  }
+
+  // ---------- lock screen PIN ----------
+
+  function pinGroup() {
+    const on = !!window.ultraspaceUser?.pin;
+    const box = h('div', { class: 'switch-row pattern-row' },
+      h('span', null, h('b', null, on ? 'Lock Screen PIN is on' : 'Lock Screen PIN is off'),
+        h('span', { class: 'set-desc' }, on
+          ? 'Fast 4–12 digit PIN to unlock your unattended screen. Forgot it? On the server run: sudo -u ultraspace ultraspace reset-pin -user ' + (window.ultraspaceUser?.username || 'NAME') + ' (or unlock with your master password).'
+          : 'Set a 4–12 digit numeric PIN to unlock quickly when unattended. Kept separate from your login password and 2FA pattern.')),
+      h('div', { class: 'hero-actions' },
+        h('button', { class: `btn ${on ? '' : 'primary'}`, onclick: () => setupPIN() }, on ? 'Change PIN' : 'Set up PIN'),
+        on ? h('button', { class: 'btn', onclick: () => removePIN() }, 'Turn off') : null));
+    return group('Lock Screen PIN', null, box);
+  }
+
+  function setupPIN() {
+    const pin = h('input', { class: 'input', type: 'password', inputmode: 'numeric', maxlength: '12', placeholder: 'New PIN (4–12 digits)', autocomplete: 'off' });
+    const confirm = h('input', { class: 'input', type: 'password', inputmode: 'numeric', maxlength: '12', placeholder: 'Confirm new PIN', autocomplete: 'off' });
+    const pwd = h('input', { class: 'input', type: 'password', placeholder: 'Current account password', autocomplete: 'current-password' });
+    const errBox = h('div', { class: 'form-error' });
+    const save = h('button', { class: 'btn primary' }, 'Save PIN');
+
+    const submit = async () => {
+      errBox.textContent = '';
+      if (!/^[0-9]{4,12}$/.test(pin.value)) {
+        errBox.textContent = 'PIN must be between 4 and 12 digits (numbers only).';
+        return;
+      }
+      if (pin.value !== confirm.value) {
+        errBox.textContent = 'PINs do not match.';
+        return;
+      }
+      if (!pwd.value) {
+        errBox.textContent = 'Enter your current account password to save.';
+        return;
+      }
+      save.disabled = true;
+      try {
+        await api('POST', '/api/account/pin', { password: pwd.value, pin: pin.value });
+        window.ultraspaceUser.pin = true;
+        close();
+        toast('Lock screen PIN saved');
+        show('account');
+      } catch (err) {
+        errBox.textContent = err.message;
+        save.disabled = false;
+      }
+    };
+
+    save.addEventListener('click', submit);
+    const onEnter = (e) => { if (e.key === 'Enter') submit(); };
+    pin.addEventListener('keydown', onEnter);
+    confirm.addEventListener('keydown', onEnter);
+    pwd.addEventListener('keydown', onEnter);
+
+    const close = dialog({
+      title: window.ultraspaceUser?.pin ? 'Change Lock Screen PIN' : 'Set up Lock Screen PIN', width: '380px',
+      body: h('div', { class: 'set-form' },
+        h('label', { class: 'field-label' }, 'New numeric PIN (4–12 digits)'), pin,
+        h('label', { class: 'field-label' }, 'Confirm new PIN'), confirm,
+        h('label', { class: 'field-label' }, 'Current account password'), pwd,
+        errBox),
+      actions: [h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), save],
+    });
+    setTimeout(() => pin.focus(), 50);
+  }
+
+  function removePIN() {
+    const pwd = h('input', { class: 'input', type: 'password', placeholder: 'Your current account password', autocomplete: 'current-password' });
+    const msg = h('div', { class: 'form-error' });
+    const ok = h('button', {
+      class: 'btn danger-solid',
+      onclick: async () => {
+        try {
+          await api('POST', '/api/account/pin', { password: pwd.value, pin: '' });
+          window.ultraspaceUser.pin = false;
+          close();
+          toast('Lock screen PIN turned off');
+          show('account');
+        } catch (err) { msg.textContent = err.message; }
+      },
+    }, 'Turn off');
+    pwd.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok.click(); });
+    const close = dialog({
+      title: 'Turn off Lock Screen PIN', width: '360px',
+      body: h('div', { class: 'set-form' },
+        h('p', { class: 'dialog-text' }, 'Enter your account password to turn off the lock screen PIN. You will unlock with your account password instead.'),
+        pwd, msg),
+      actions: [h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), ok],
+    });
+    setTimeout(() => pwd.focus(), 50);
+  }
+
+  function lockscreenSettingsGroup() {
+    const s = settings.data;
+    const timeouts = [
+      [0, 'Never (manual lock only)'],
+      [60, '1 minute'],
+      [120, '2 minutes'],
+      [300, '5 minutes (recommended)'],
+      [600, '10 minutes'],
+      [900, '15 minutes'],
+      [1800, '30 minutes'],
+    ];
+
+    const sel = h('select', {
+      class: 'input set-select',
+      onchange: (e) => settings.set({ lockTimeout: Number(e.target.value) }),
+    }, timeouts.map(([val, label]) => h('option', { value: String(val), selected: Number(s.lockTimeout ?? 300) === val }, label)));
+
+    const nowPlayingSwitch = h('label', { class: 'switch-row' },
+      h('span', null, h('b', null, 'Now Playing widget'), h('span', { class: 'set-desc' }, 'Show active music or video playback with media controls on the lock screen.')),
+      h('input', { type: 'checkbox', class: 'switch', checked: s.lockShowNowPlaying !== false, onchange: (e) => settings.set({ lockShowNowPlaying: e.target.checked }) }));
+
+    const sysStatsSwitch = h('label', { class: 'switch-row' },
+      h('span', null, h('b', null, 'System Glance widget'), h('span', { class: 'set-desc' }, 'Show live CPU, Memory, and Uptime pills on the lock screen.')),
+      h('input', { type: 'checkbox', class: 'switch', checked: s.lockShowSystemStats !== false, onchange: (e) => settings.set({ lockShowSystemStats: e.target.checked }) }));
+
+    const clockStyleSeg = h('div', { class: 'seg big' }, [
+      ['modern', 'Modern (Bold)'],
+      ['clean', 'Clean'],
+      ['minimal', 'Minimal'],
+    ].map(([id, label]) =>
+      h('button', {
+        class: `seg-btn text ${(s.lockClockStyle || 'modern') === id ? 'active' : ''}`,
+        onclick: () => settings.set({ lockClockStyle: id }),
+      }, label)));
+
+    const noteInput = h('input', {
+      class: 'input',
+      type: 'text',
+      placeholder: 'e.g. Property of Vishnu · Call +1 234 567 8900',
+      value: s.lockCustomMessage || '',
+      oninput: (e) => settings.set({ lockCustomMessage: e.target.value }),
+    });
+
+    const lockNowBtn = h('button', { class: 'btn', onclick: () => lockDesktop() }, icon('lock', 14), 'Lock screen now (Ctrl Alt L)');
+
+    return group('Unattended Lock Screen & Widgets',
+      'Ultraspace automatically locks when unattended. Video and audio playback automatically inhibit locking so movies and music aren’t interrupted.',
+      h('div', { class: 'set-row' }, h('span', null, h('b', null, 'Auto-lock when idle')), sel),
+      h('div', { style: { height: '8px' } }),
+      clockStyleSeg,
+      h('div', { style: { height: '8px' } }),
+      nowPlayingSwitch,
+      sysStatsSwitch,
+      h('div', { style: { height: '8px' } }),
+      h('label', { class: 'field-label' }, 'Owner note / Lock screen message'),
+      noteInput,
+      h('div', { style: { height: '14px' } }),
+      lockNowBtn);
   }
 
   // ---------- pattern lock ----------

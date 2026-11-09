@@ -327,7 +327,19 @@ export function confirmDialog(title, text, okLabel = 'Delete', danger = true) {
 
 // ---------- settings ----------
 
-export const DEFAULTS = { theme: 'dark', accent: '#7c6cf2', wallpaper: 'aurora', transparency: true, filesView: 'grid', buttons: 'right' };
+export const DEFAULTS = {
+  theme: 'dark',
+  accent: '#7c6cf2',
+  wallpaper: 'aurora',
+  transparency: true,
+  filesView: 'grid',
+  buttons: 'right',
+  lockTimeout: 300,            // idle timeout in seconds (default 5m; 0 = never)
+  lockClockStyle: 'modern',    // 'modern' | 'clean' | 'minimal'
+  lockShowNowPlaying: true,    // show Now Playing media widget on lockscreen
+  lockShowSystemStats: true,   // show system glance widget on lockscreen
+  lockCustomMessage: '',       // optional custom lockscreen note / owner info
+};
 
 export const settings = {
   data: { ...DEFAULTS },

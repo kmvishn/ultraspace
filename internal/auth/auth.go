@@ -112,6 +112,7 @@ func (a *Auth) Register(mux *http.ServeMux) {
 	mux.Handle("PUT /api/account/settings", a.Require(http.HandlerFunc(a.handlePutSettings)))
 	mux.Handle("GET /api/account/sessions", a.Require(http.HandlerFunc(a.handleSessions)))
 	a.registerPattern(mux)
+	a.registerPIN(mux)
 	mux.Handle("POST /api/account/sessions/revoke", a.Require(http.HandlerFunc(a.handleRevoke)))
 }
 
@@ -493,7 +494,7 @@ func validateCredentials(username, password string) string {
 }
 
 func userJSON(u store.User) map[string]any {
-	return map[string]any{"id": u.ID, "username": u.Username, "pattern": u.PatternHash != ""}
+	return map[string]any{"id": u.ID, "username": u.Username, "pattern": u.PatternHash != "", "pin": u.PINHash != ""}
 }
 
 func randomToken(n int) string {

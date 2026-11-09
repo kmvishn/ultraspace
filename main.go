@@ -31,6 +31,10 @@ func main() {
 		resetPattern(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "reset-pin" {
+		resetPIN(os.Args[2:])
+		return
+	}
 	configPath := flag.String("config", "/etc/ultraspace/config.toml", "path to the config file (missing file = defaults)")
 	listen := flag.String("listen", "", "override the listen address")
 	dataDir := flag.String("data", "", "override the data directory")
@@ -108,6 +112,39 @@ func resetPattern(args []string) {
 		os.Exit(1)
 	}
 	fmt.Printf("Pattern lock turned off for %s. They can sign in with the password alone.\n", *user)
+}
+
+// resetPIN turns off a user's lockscreen PIN, for when it is forgotten:
+// sudo -u ultraspace ultraspace reset-pin -user NAME
+func resetPIN(args []string) {
+	fs := flag.NewFlagSet("reset-pin", flag.ExitOnError)
+	configPath := fs.String("config", "/etc/ultraspace/config.toml", "config file")
+	user := fs.String("user", "", "the account whose lockscreen PIN to turn off")
+	_ = fs.Parse(args)
+	cfg, err := config.Load(*configPath)
+	if err == nil {
+		err = cfg.Finalize()
+	}
+	if err != nil || *user == "" {
+		fmt.Fprintln(os.Stderr, "usage: ultraspace reset-pin -user NAME [-config FILE]", err)
+		os.Exit(2)
+	}
+	st, err := store.Open(filepath.Join(cfg.DataDir, "ultraspace.db"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "open database:", err)
+		os.Exit(1)
+	}
+	defer st.Close()
+	ok, err := st.ClearPINByName(context.Background(), *user)
+	switch {
+	case err != nil:
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	case !ok:
+		fmt.Fprintf(os.Stderr, "no user %q\n", *user)
+		os.Exit(1)
+	}
+	fmt.Printf("Lockscreen PIN turned off for %s. They can unlock with their master password.\n", *user)
 }
 
 // runAgent is "ultraspace agent": the Terminal and VS Code backend, run as a login user.

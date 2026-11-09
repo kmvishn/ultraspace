@@ -1340,3 +1340,349 @@ kbd { font-family: var(--font); font-size: 11px; padding: 2px 6px; border-radius
   .uc-bubble { right: 14px; bottom: calc(96px + env(safe-area-inset-bottom)); width: 50px; height: 50px; }
   .uc-panel { inset: 0; width: 100%; height: 100%; border-radius: 0; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
 }
+
+/* ---------- Unattended Lock Screen, PIN Pad & Widgets ---------- */
+
+.desktop-lock {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  backdrop-filter: blur(28px) brightness(0.7);
+  -webkit-backdrop-filter: blur(28px) brightness(0.7);
+  background-color: rgba(11, 16, 38, 0.65);
+  background-size: cover;
+  background-position: center;
+  color: #fff;
+  transition: opacity .28s cubic-bezier(0.16, 1, 0.3, 1), transform .28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.desktop-lock.unlocking {
+  opacity: 0;
+  transform: scale(1.04);
+  pointer-events: none;
+}
+
+.lock-bar {
+  width: 100%;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  flex-shrink: 0;
+}
+
+.lock-bar-left, .lock-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.lock-bar-host {
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+
+.lock-bar-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lock-bar-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition: background .15s;
+}
+
+.lock-bar-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.lock-center-col {
+  width: 100%;
+  max-width: 420px;
+  margin: auto 0;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  box-sizing: border-box;
+}
+
+/* Clock styles */
+.lock-clock.style-modern .lock-time {
+  font-size: clamp(68px, 14vw, 112px);
+  font-weight: 800;
+  letter-spacing: -.03em;
+  text-shadow: 0 4px 30px rgba(0, 0, 0, 0.4);
+}
+
+.lock-clock.style-clean .lock-time {
+  font-size: clamp(56px, 11vw, 92px);
+  font-weight: 250;
+  letter-spacing: .02em;
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
+}
+
+.lock-clock.style-minimal .lock-time {
+  font-size: clamp(48px, 9vw, 76px);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.lock-clock .lock-date {
+  font-size: 16px;
+  font-weight: 500;
+  margin-top: 4px;
+  opacity: .9;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+/* Custom owner message widget */
+.lock-custom-msg {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: 12.5px;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  max-width: 90%;
+  word-break: break-word;
+}
+
+/* System Glance Widget */
+.lock-widget-sys {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.lock-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 12px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* Now Playing Widget */
+.lock-widget-nowplaying {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 360px;
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-sizing: border-box;
+}
+
+.lock-widget-nowplaying.hidden {
+  display: none;
+}
+
+.lock-np-cover {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.1);
+  background-size: cover;
+  background-position: center;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.lock-np-info {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.lock-np-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #fff;
+}
+
+.lock-np-artist {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lock-np-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.lock-np-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: #fff;
+  transition: background .12s, transform .12s;
+}
+
+.lock-np-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.lock-np-btn:active {
+  transform: scale(0.92);
+}
+
+.lock-np-btn.primary {
+  background: var(--accent, #7c6cf2);
+}
+
+.lock-np-btn.primary:hover {
+  filter: brightness(1.15);
+}
+
+/* PIN Dots */
+.lock-pin-dots {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0 16px;
+  min-height: 20px;
+}
+
+.pin-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: transparent;
+  transition: all .15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pin-dot.filled {
+  background: var(--accent, #7c6cf2);
+  border-color: var(--accent, #7c6cf2);
+  transform: scale(1.18);
+  box-shadow: 0 0 14px var(--accent, #7c6cf2);
+}
+
+/* PIN Keypad */
+.pin-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  justify-items: center;
+  margin: 6px 0 12px;
+}
+
+.pin-key {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  font-weight: 500;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  user-select: none;
+  transition: background .12s, transform .12s, border-color .12s;
+}
+
+.pin-key:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: scale(1.05);
+}
+
+.pin-key:active {
+  background: var(--accent, #7c6cf2);
+  border-color: transparent;
+  transform: scale(0.94);
+}
+
+.pin-key.pin-action {
+  font-size: 15px;
+  font-weight: 600;
+  background: transparent;
+  border-color: transparent;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.pin-key.pin-action:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.lock-pin-btn {
+  width: 100%;
+  height: 42px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 6px;
+}

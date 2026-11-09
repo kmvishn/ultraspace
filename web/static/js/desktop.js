@@ -8,6 +8,7 @@ import { stopSession } from './session.js';
 import { startEvents, stopEvents, togglePanel } from './clipboard.js';
 import { startChatbot, stopChatbot } from './chatbot.js';
 import { webTarget } from './apps/browser.js';
+import { initLockScreen, lockDesktop } from './lockscreen.js';
 
 export const WALLPAPERS = [
   { id: 'aurora', name: 'Aurora' },
@@ -75,6 +76,7 @@ export function buildDesktop(user, { onSignOut }) {
       { label: 'Open Files', icon: 'folder', action: () => openApp('files') },
       { label: 'Search…', icon: 'search', hint: 'Ctrl K', action: openLauncher },
       '-',
+      { label: 'Lock screen', icon: 'lock', hint: 'Ctrl Alt L', action: lockDesktop },
       { label: 'Change wallpaper…', icon: 'wallpaper', action: () => openApp('settings', { section: 'appearance' }) },
     ]);
   });
@@ -111,6 +113,7 @@ export function buildDesktop(user, { onSignOut }) {
   addEventListener('keydown', onKey);
   cleanup.push(() => removeEventListener('keydown', onKey));
   cleanup.push(() => { stopSession(); stopEvents(); closeAllWindows(); });
+  cleanup.push(initLockScreen(user, onSignOut));
   startEvents();
   startChatbot();
   cleanup.push(() => stopChatbot());
@@ -137,6 +140,7 @@ function menuBar(user, onSignOut) {
         { label: 'About ultraspace', icon: 'info', action: () => openApp('settings', { section: 'about' }) },
         { label: 'Settings', icon: 'sliders', action: () => openApp('settings') },
         '-',
+        { label: 'Lock screen', icon: 'lock', hint: 'Ctrl Alt L', action: lockDesktop },
         { label: `Sign out ${user.username}`, icon: 'logOut', action: onSignOut },
       ]);
     },
@@ -383,11 +387,22 @@ export function openLauncher() {
       : [{ group: 'Web', title: `Search the web for “${t.search}”`, sub: 'In Browser', tile, run: () => openApp('browser', { open: raw }) }];
   };
 
+  const systemItems = (q) => {
+    if (!q || 'lock screen'.includes(q)) {
+      return [{
+        group: 'System', title: 'Lock screen', sub: 'Lock screen immediately (Ctrl Alt L)',
+        tile: h('span', { class: 'li-tile', style: { background: 'linear-gradient(145deg, #64748b, #334155)' } }, icon('lock', 16)),
+        run: lockDesktop,
+      }];
+    }
+    return [];
+  };
+
   const searchFiles = debounce(async (q, mySeq) => {
     try {
       const res = await api('GET', `/api/files/search?q=${encodeURIComponent(q)}&limit=30`);
       if (mySeq !== seq) return;
-      items = [...appItems(q), ...webItems(input.value), ...res.results.map((f) => ({
+      items = [...appItems(q), ...systemItems(q), ...webItems(input.value), ...res.results.map((f) => ({
         group: 'Files', title: f.name, sub: dirOf(f.path),
         tile: h('span', { class: `li-tile file k-${kindOf(f)}` }, icon(KIND_ICON[kindOf(f)], 16)),
         run: () => (f.dir ? openApp('files', { path: f.path }) : openFile(f, {})),
@@ -400,7 +415,7 @@ export function openLauncher() {
     const q = input.value.trim().toLowerCase();
     active = 0;
     seq++;
-    items = [...appItems(q), ...webItems(input.value)];
+    items = [...appItems(q), ...systemItems(q), ...webItems(input.value)];
     render();
     if (q.length >= 2) searchFiles(q, seq);
   });
@@ -411,10 +426,10 @@ export function openLauncher() {
     else if (e.key === 'Enter' && items[active]) { close(); items[active].run(); }
   });
 
-  items = appItems('');
+  items = [...appItems(''), ...systemItems('')];
   render();
   document.body.append(back);
   input.focus();
 }
 
-export { emit };
+export { emit, lockDesktop };
