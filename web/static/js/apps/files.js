@@ -20,6 +20,7 @@ function mountFiles(win, args) {
   const back = [];
   const fwd = [];
   let places = [];
+  let drives = [];
 
   const crumbs = h('div', { class: 'crumbs' });
   const backBtn = h('button', { class: 'icon-btn', 'aria-label': 'Back', onclick: () => goBack() }, icon('chevronLeft'));
@@ -32,11 +33,17 @@ function mountFiles(win, args) {
   const content = h('div', { class: 'files-content', tabindex: '0' });
   const status = h('div', { class: 'statusbar' });
   const placesEl = h('div', { class: 'side-list' });
+  const drivesEl = h('div', { class: 'side-list' });
+  const drivesSection = h('div', { style: { marginTop: '12px' } },
+    h('div', { class: 'side-title' }, 'Drives & Devices'),
+    drivesEl
+  );
   const storage = h('div', { class: 'side-storage' });
 
   const root = h('div', { class: 'app app-files' },
     h('aside', { class: 'side' },
       h('div', { class: 'side-title' }, 'Places'), placesEl,
+      drivesSection,
       h('div', { class: 'side-fill' }), storage),
     h('div', { class: 'main' },
       h('div', { class: 'toolbar' },
@@ -84,10 +91,28 @@ function mountFiles(win, args) {
   }
 
   async function loadPlaces() {
+    let driveStat = null;
     try {
-      const res = await api('GET', '/api/files/list?path=/');
-      places = res.entries.filter((e) => e.dir).map((e) => ({ name: e.name, path: `/${e.name}` }));
-    } catch { places = []; }
+      const res = await api('GET', '/api/files/places');
+      if (res && res.places) {
+        places = res.places;
+        drives = res.drives || [];
+      } else {
+        const listRes = await api('GET', '/api/files/list?path=/');
+        places = listRes.entries.filter((e) => e.dir).map((e) => ({ name: e.name, path: `/${e.name}` }));
+        drives = [];
+      }
+    } catch {
+      places = [];
+      drives = [];
+    }
+
+    try {
+      driveStat = await api('GET', `/api/files/stat?path=${encodeURIComponent(path)}`);
+    } catch {
+      driveStat = null;
+    }
+
     const placeIcon = (name) => {
       const n = name.toLowerCase();
       if (n.includes('music') || n.includes('audio')) return 'music';
@@ -96,21 +121,54 @@ function mountFiles(win, args) {
       if (n.includes('download')) return 'download';
       if (n.includes('doc')) return 'fileText';
       if (n.includes('project') || n.includes('code') || n.includes('src')) return 'code';
+      if (n.includes('home')) return 'home';
+      if (n.includes('file system') || n === '/') return 'server';
       return 'folder';
     };
-    const item = (label, p, ic) => {
+
+    const item = (label, p, ic, sub) => {
+      const isActive = p === path || (p !== '/' && (path === p || path.startsWith(p + '/')));
       const el = h('button', {
-        class: `side-item ${p === path && !query ? 'active' : ''}`, onclick: () => navigate(p),
-      }, icon(ic, 16), h('span', null, label));
+        class: `side-item ${isActive && !query ? 'active' : ''}`, onclick: () => navigate(p),
+      },
+        icon(ic || 'folder', 16),
+        h('span', null, label),
+        sub ? h('span', { class: 'side-count' }, sub) : null
+      );
       dropTarget(el, p);
       return el;
     };
-    placesEl.replaceChildren(item('Home', '/', 'home'), ...places.map((p) => item(p.name, p.path, placeIcon(p.name))));
-    const disk = (system.latest?.disks || []).find((d) => d.label === 'Files') || (system.latest?.disks || [])[0];
-    storage.replaceChildren(disk ? h('div', null,
-      h('div', { class: 'side-storage-head' }, icon('hardDrive', 14), 'Storage'),
-      h('div', { class: 'meter thin' }, h('div', { style: { width: `${((100 * disk.used) / disk.total).toFixed(1)}%` } })),
-      h('div', { class: 'side-storage-sub' }, `${fmtBytes(disk.total - disk.used)} free of ${fmtBytes(disk.total)}`)) : '');
+
+    if (places.length) {
+      placesEl.replaceChildren(...places.map((p) => item(p.name, p.path, p.icon || placeIcon(p.name))));
+    } else {
+      placesEl.replaceChildren(item('File System', '/', 'server'));
+    }
+
+    if (drives && drives.length > 0) {
+      drivesSection.style.display = '';
+      drivesEl.replaceChildren(
+        ...drives.map((d) => item(d.name, d.mountpoint, d.removable ? 'usb' : 'hardDrive', d.total ? `${fmtBytes(d.free)} free` : ''))
+      );
+    } else {
+      drivesSection.style.display = 'none';
+    }
+
+    const disk = driveStat || (system.latest?.disks || []).find((d) => d.label === 'Files') || (system.latest?.disks || [])[0];
+    if (disk && disk.total > 0) {
+      const free = disk.free !== undefined ? disk.free : (disk.total - disk.used);
+      const used = disk.used !== undefined ? disk.used : (disk.total - free);
+      const pct = Math.min(100, Math.max(0, ((100 * used) / disk.total))).toFixed(1);
+      storage.replaceChildren(
+        h('div', null,
+          h('div', { class: 'side-storage-head' }, icon('hardDrive', 14), disk.name || 'Storage'),
+          h('div', { class: 'meter thin' }, h('div', { style: { width: `${pct}%` } })),
+          h('div', { class: 'side-storage-sub' }, `${fmtBytes(free)} free of ${fmtBytes(disk.total)}`)
+        )
+      );
+    } else {
+      storage.replaceChildren();
+    }
   }
 
   // ---------- rendering ----------
@@ -128,7 +186,7 @@ function mountFiles(win, args) {
 
     // Breadcrumbs
     const parts = path.split('/').filter(Boolean);
-    const cr = [h('button', { class: 'crumb', onclick: () => navigate('/') }, icon('home', 15))];
+    const cr = [h('button', { class: 'crumb', onclick: () => navigate('/') }, icon('server', 15), ' /')];
     parts.forEach((name, i) => {
       const p = '/' + parts.slice(0, i + 1).join('/');
       cr.push(icon('chevronRight', 14, 'crumb-sep'));

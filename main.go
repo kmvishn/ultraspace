@@ -34,6 +34,7 @@ func main() {
 	configPath := flag.String("config", "/etc/ultraspace/config.toml", "path to the config file (missing file = defaults)")
 	listen := flag.String("listen", "", "override the listen address")
 	dataDir := flag.String("data", "", "override the data directory")
+	filesRoot := flag.String("files-root", "", "override files root directory (use / for full system access)")
 	debug := flag.Bool("debug", false, "log every request")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
@@ -58,6 +59,9 @@ func main() {
 	}
 	if *dataDir != "" {
 		cfg.DataDir = *dataDir
+	}
+	if *filesRoot != "" {
+		cfg.FilesRoot = *filesRoot
 	}
 	if err := cfg.Finalize(); err != nil {
 		log.Error("invalid config", "err", err)

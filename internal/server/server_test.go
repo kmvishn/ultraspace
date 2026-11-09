@@ -1167,3 +1167,100 @@ func TestRevokedSessionClosesLiveConnections(t *testing.T) {
 		t.Fatal("the revoked device's live stream stayed open")
 	}
 }
+
+func TestHeadlessLaptopServerEndpoints(t *testing.T) {
+	c, cfg := setup(t)
+
+	// Verify unauthenticated requests return 401
+	unauthRoutes := []string{
+		"/api/network/status",
+		"/api/network/wifi/scan",
+		"/api/network/hotspot",
+		"/api/audio/status",
+		"/api/power/status",
+		"/api/hardware/status",
+		"/api/files/places",
+		"/api/files/drives",
+		"/api/files/stat",
+	}
+	for _, route := range unauthRoutes {
+		if code, _ := c.do("GET", route, nil, nil); code != 401 {
+			t.Fatalf("unauth GET %s = %d, want 401", route, code)
+		}
+	}
+
+	// Setup and authenticate
+	c.do("POST", "/api/setup", map[string]string{"token": token(t, cfg), "username": "admin", "password": "correct-horse-1"}, nil)
+
+	// 1. Network endpoints
+	if code, out := c.do("GET", "/api/network/status", nil, nil); code != 200 {
+		t.Fatalf("GET /api/network/status = %d", code)
+	} else if _, ok := out["interfaces"]; !ok {
+		t.Fatalf("network status missing interfaces: %v", out)
+	}
+
+	if code, out := c.do("GET", "/api/network/wifi/scan", nil, nil); code != 200 {
+		t.Fatalf("GET /api/network/wifi/scan = %d", code)
+	} else if _, ok := out["networks"]; !ok {
+		t.Fatalf("wifi scan missing networks: %v", out)
+	}
+
+	if code, out := c.do("GET", "/api/network/hotspot", nil, nil); code != 200 {
+		t.Fatalf("GET /api/network/hotspot = %d", code)
+	} else if _, ok := out["active"]; !ok {
+		t.Fatalf("hotspot missing active field: %v", out)
+	}
+
+	// 2. Audio endpoints
+	if code, out := c.do("GET", "/api/audio/status", nil, nil); code != 200 {
+		t.Fatalf("GET /api/audio/status = %d", code)
+	} else if _, ok := out["sinks"]; !ok {
+		t.Fatalf("audio missing sinks: %v", out)
+	}
+
+	// 3. Power endpoints
+	if code, out := c.do("GET", "/api/power/status", nil, nil); code != 200 {
+		t.Fatalf("GET /api/power/status = %d", code)
+	} else if _, ok := out["percent"]; !ok {
+		t.Fatalf("power missing percent: %v", out)
+	}
+
+	// 4. Hardware endpoints
+	if code, out := c.do("GET", "/api/hardware/status", nil, nil); code != 200 {
+		t.Fatalf("GET /api/hardware/status = %d", code)
+	} else {
+		if _, ok := out["bluetooth"]; !ok {
+			t.Fatalf("hardware status missing bluetooth: %v", out)
+		}
+		if _, ok := out["usb_devices"]; !ok {
+			t.Fatalf("hardware status missing usb_devices: %v", out)
+		}
+		if _, ok := out["pci_devices"]; !ok {
+			t.Fatalf("hardware status missing pci_devices: %v", out)
+		}
+	}
+
+	// 5. Files / Places / Drives endpoints
+	if code, out := c.do("GET", "/api/files/places", nil, nil); code != 200 {
+		t.Fatalf("GET /api/files/places = %d", code)
+	} else {
+		if _, ok := out["places"]; !ok {
+			t.Fatalf("places response missing places: %v", out)
+		}
+		if _, ok := out["drives"]; !ok {
+			t.Fatalf("places response missing drives: %v", out)
+		}
+	}
+
+	if code, out := c.do("GET", "/api/files/drives", nil, nil); code != 200 {
+		t.Fatalf("GET /api/files/drives = %d", code)
+	} else if _, ok := out["drives"]; !ok {
+		t.Fatalf("drives response missing drives: %v", out)
+	}
+
+	if code, out := c.do("GET", "/api/files/stat?path=/", nil, nil); code != 200 {
+		t.Fatalf("GET /api/files/stat = %d", code)
+	} else if _, ok := out["total"]; !ok {
+		t.Fatalf("stat response missing total space: %v", out)
+	}
+}

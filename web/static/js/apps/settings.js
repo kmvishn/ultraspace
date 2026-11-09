@@ -12,6 +12,9 @@ registerApp({
 
 const SECTIONS = [
   { id: 'appearance', label: 'Appearance', icon: 'palette' },
+  { id: 'sound', label: 'Sound & Audio', icon: 'volume' },
+  { id: 'network', label: 'Network', icon: 'wifi' },
+  { id: 'hardware', label: 'Bluetooth & Hardware', icon: 'bluetooth' },
   { id: 'account', label: 'Account', icon: 'user' },
   { id: 'devices', label: 'Devices', icon: 'laptop' },
   { id: 'chatbot', label: 'Ultra Chat Bot', icon: 'sparkles' },
@@ -30,7 +33,7 @@ function mountSettings(win, args) {
     if (off) { off(); off = null; }
     nav.replaceChildren(...SECTIONS.map((s) => h('button', { class: `side-item ${s.id === id ? 'active' : ''}`, onclick: () => show(s.id) }, icon(s.icon, 16), h('span', null, s.label))));
     win.setTitle(`Settings — ${SECTIONS.find((s) => s.id === id).label}`);
-    off = { appearance, account, devices, chatbot, about }[id](main) || null;
+    off = { appearance, sound, network, hardware, account, devices, chatbot, about }[id](main) || null;
   };
   show(args.restore?.section || args.section || 'appearance');
   return {
@@ -75,6 +78,533 @@ function mountSettings(win, args) {
     return on('settings', render);
   }
 
+  function sound(el) {
+    const sinkList = h('div', { class: 'device-list' }, h('div', { class: 'empty-state small' }, 'Checking audio devices…'));
+    const volSlider = h('input', { type: 'range', min: '0', max: '100', value: '100', class: 'slider', style: { flex: '1', accentColor: 'var(--accent)' } });
+    const volNum = h('span', { class: 'card-big', style: { minWidth: '48px', textAlign: 'right' } }, '100%');
+    const muteBtn = h('button', { class: 'btn small' }, icon('volume', 14), 'Mute');
+    const testBtn = h('button', { class: 'btn small primary' }, icon('play', 14), 'Play Test Sound');
+    let timer = null;
+    let isUpdating = false;
+
+    async function loadStatus() {
+      if (isUpdating) return;
+      try {
+        const st = await api('GET', '/api/audio/status');
+        if (!st.available) {
+          sinkList.replaceChildren(h('div', { class: 'device' },
+            h('span', { class: 'device-icon' }, icon('volumeX', 20)),
+            h('div', { class: 'device-text' },
+              h('div', { class: 'device-name' }, 'Audio subsystem not available'),
+              h('div', { class: 'set-desc' }, 'PulseAudio or PipeWire (pactl) is not active on this host.'))));
+          volSlider.disabled = true;
+          muteBtn.disabled = true;
+          testBtn.disabled = true;
+          return;
+        }
+
+        volSlider.disabled = false;
+        muteBtn.disabled = false;
+        testBtn.disabled = false;
+
+        volSlider.value = st.volume;
+        volNum.textContent = `${st.volume}%`;
+        muteBtn.replaceChildren(icon(st.mute ? 'volumeX' : 'volume', 14), st.mute ? 'Unmute' : 'Mute');
+        if (st.mute) muteBtn.classList.add('warn'); else muteBtn.classList.remove('warn');
+
+        if (!st.sinks || st.sinks.length === 0) {
+          sinkList.replaceChildren(h('div', { class: 'empty-state small' }, 'No audio output sinks detected.'));
+          return;
+        }
+
+        sinkList.replaceChildren(...st.sinks.map((s) => {
+          let sIcon = 'volume';
+          let sTypeBadge = 'Speaker / Jack';
+          if (s.type === 'hdmi') {
+            sIcon = 'tv';
+            sTypeBadge = 'HDMI / DisplayPort';
+          } else if (s.type === 'bluetooth') {
+            sIcon = 'music';
+            sTypeBadge = 'Bluetooth';
+          } else if (s.type === 'usb') {
+            sIcon = 'sliders';
+            sTypeBadge = 'USB Audio';
+          } else if (s.type === 'virtual') {
+            sIcon = 'monitor';
+            sTypeBadge = 'Virtual Sink';
+          }
+
+          const actionBtn = s.active
+            ? h('span', { class: 'pill active' }, 'Active Output')
+            : h('button', { class: 'btn small', onclick: () => selectSink(s) }, 'Select');
+
+          return h('div', { class: `device ${s.active ? 'current' : ''}` },
+            h('span', { class: 'device-icon' }, icon(sIcon, 18)),
+            h('div', { class: 'device-text' },
+              h('div', { class: 'device-name' }, s.description || s.name, h('span', { class: 'pill' }, sTypeBadge)),
+              h('div', { class: 'set-desc' }, `${s.volume}% volume · ${s.mute ? 'Muted' : 'Unmuted'} · ${s.name}`)),
+            actionBtn);
+        }));
+      } catch (err) {
+        report(err);
+      }
+    }
+
+    async function selectSink(s) {
+      try {
+        await api('POST', '/api/audio/sink', { sink: s.name });
+        toast(`Audio output switched to ${s.description || s.name}`);
+        await loadStatus();
+      } catch (err) {
+        report(err);
+      }
+    }
+
+    volSlider.oninput = () => {
+      volNum.textContent = `${volSlider.value}%`;
+    };
+
+    volSlider.onchange = async () => {
+      isUpdating = true;
+      try {
+        await api('POST', '/api/audio/volume', { volume: parseInt(volSlider.value, 10) });
+      } catch (err) {
+        report(err);
+      } finally {
+        isUpdating = false;
+        await loadStatus();
+      }
+    };
+
+    muteBtn.onclick = async () => {
+      isUpdating = true;
+      try {
+        const currentMuted = muteBtn.textContent.trim() === 'Unmute';
+        await api('POST', '/api/audio/mute', { mute: !currentMuted });
+      } catch (err) {
+        report(err);
+      } finally {
+        isUpdating = false;
+        await loadStatus();
+      }
+    };
+
+    testBtn.onclick = async () => {
+      testBtn.disabled = true;
+      try {
+        await api('POST', '/api/audio/test');
+        toast('Playing test chime on server speakers…');
+      } catch (err) {
+        toast('Could not play test sound: ' + err.message);
+      } finally {
+        setTimeout(() => { testBtn.disabled = false; }, 1500);
+      }
+    };
+
+    const volRow = h('div', { class: 'switch-row', style: { alignItems: 'center' } },
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', flex: '1', marginRight: '16px' } },
+        icon('volume', 18),
+        volSlider,
+        volNum),
+      h('div', { class: 'hero-actions' }, muteBtn, testBtn));
+
+    el.replaceChildren(h('div', { class: 'settings-page' },
+      group('Master Volume & Controls', 'Controls physical output volume on the server.', volRow),
+      group('Audio Output Devices', 'Choose which physical speaker, headphone jack, HDMI, or Bluetooth sink to output sound through.', sinkList)));
+
+    loadStatus();
+    timer = setInterval(loadStatus, 15_000);
+    return () => clearInterval(timer);
+  }
+
+  function network(el) {
+    const statusBox = h('div', { class: 'device-list' }, h('div', { class: 'empty-state small' }, 'Checking network…'));
+    const hotspotBox = h('div', { class: 'device-list' });
+    const wifiList = h('div', { class: 'device-list' }, h('div', { class: 'empty-state small' }, 'Scanning Wi-Fi…'));
+    const ifaceList = h('div', { class: 'device-list' });
+    const scanBtn = h('button', { class: 'btn small', onclick: () => scan(true) }, icon('refresh', 14), 'Scan');
+    let timer = null;
+
+    async function startHotspot() {
+      try {
+        await api('POST', '/api/network/hotspot/start');
+        toast('Setup hotspot activated (Ultraspace-Setup)');
+        await loadStatus();
+      } catch (err) {
+        report(err);
+      }
+    }
+
+    async function stopHotspot() {
+      try {
+        await api('POST', '/api/network/hotspot/stop');
+        toast('Setup hotspot stopped');
+        await loadStatus();
+      } catch (err) {
+        report(err);
+      }
+    }
+
+    async function loadStatus() {
+      try {
+        const st = await api('GET', '/api/network/status');
+        if (!st.available) {
+          statusBox.replaceChildren(h('div', { class: 'device' },
+            h('span', { class: 'device-icon' }, icon('wifiOff', 20)),
+            h('div', { class: 'device-text' },
+              h('div', { class: 'device-name' }, 'NetworkManager not available'),
+              h('div', { class: 'set-desc' }, 'NetworkManager (nmcli) is not active on this host.'))));
+          hotspotBox.replaceChildren();
+          wifiList.replaceChildren(h('div', { class: 'empty-state small' }, 'Wi-Fi management requires NetworkManager.'));
+          ifaceList.replaceChildren();
+          return;
+        }
+
+        const iconName = st.connected ? (st.type === 'wifi' ? 'wifi' : 'server') : 'wifiOff';
+        const title = st.connected
+          ? (st.type === 'wifi' ? `Connected to Wi-Fi (${st.ssid || 'Unknown'})` : `Connected via Ethernet (${st.primary})`)
+          : 'Disconnected';
+        const sub = st.connected ? `IP: ${st.ip || 'Obtaining…'} · Primary: ${st.primary}` : 'No active internet connection';
+
+        statusBox.replaceChildren(h('div', { class: 'device current' },
+          h('span', { class: 'device-icon' }, icon(iconName, 20)),
+          h('div', { class: 'device-text' },
+            h('div', { class: 'device-name' }, title, h('span', { class: `pill ${st.connected ? 'active' : 'failed'}` }, st.connected ? 'Online' : 'Offline')),
+            h('div', { class: 'set-desc' }, sub))));
+
+        if (st.hotspot_active) {
+          hotspotBox.replaceChildren(h('div', { class: 'device current' },
+            h('span', { class: 'device-icon' }, icon('wifi', 20)),
+            h('div', { class: 'device-text' },
+              h('div', { class: 'device-name' }, `Setup Hotspot Active (${st.hotspot_ssid || 'Ultraspace-Setup'})`, h('span', { class: 'pill active' }, 'Broadcasting')),
+              h('div', { class: 'set-desc' }, 'Connect your phone or device to this Wi-Fi to configure the server.')),
+            h('button', { class: 'btn small', onclick: () => stopHotspot() }, 'Stop Hotspot')));
+        } else {
+          hotspotBox.replaceChildren(h('div', { class: 'device' },
+            h('span', { class: 'device-icon' }, icon('wifi', 20)),
+            h('div', { class: 'device-text' },
+              h('div', { class: 'device-name' }, 'Fallback Setup Hotspot', h('span', { class: 'pill' }, 'Auto-Standby')),
+              h('div', { class: 'set-desc' }, 'Broadcasts "Ultraspace-Setup" automatically if no network is reachable after 45s.')),
+            h('button', { class: 'btn small', onclick: () => startHotspot() }, 'Start Hotspot Now')));
+        }
+
+        if (st.interfaces && st.interfaces.length > 0) {
+          ifaceList.replaceChildren(...st.interfaces.map((iface) => {
+            const ifIcon = iface.type === 'wifi' ? 'wifi' : 'server';
+            const details = [
+              iface.ipv4 ? `IP: ${iface.ipv4}` : null,
+              iface.gateway ? `Gateway: ${iface.gateway}` : null,
+              iface.mac ? `MAC: ${iface.mac}` : null,
+            ].filter(Boolean).join(' · ');
+            return h('div', { class: 'device' },
+              h('span', { class: 'device-icon' }, icon(ifIcon, 18)),
+              h('div', { class: 'device-text' },
+                h('div', { class: 'device-name' }, iface.name, h('span', { class: `pill ${iface.state === 'connected' ? 'active' : ''}` }, iface.state)),
+                h('div', { class: 'set-desc' }, details || 'No IP address assigned')));
+          }));
+        } else {
+          ifaceList.replaceChildren(h('div', { class: 'empty-state small' }, 'No network interfaces detected.'));
+        }
+      } catch (err) {
+        report(err);
+      }
+    }
+
+    async function scan(rescan = false) {
+      scanBtn.disabled = true;
+      try {
+        const { networks } = await api('GET', `/api/network/wifi/scan${rescan ? '?rescan=true' : ''}`);
+        if (!networks || networks.length === 0) {
+          wifiList.replaceChildren(h('div', { class: 'empty-state small' }, 'No Wi-Fi networks found.'));
+          return;
+        }
+
+        wifiList.replaceChildren(...networks.map((ap) => {
+          const actionBtn = ap.in_use
+            ? h('button', { class: 'btn small', onclick: () => disconnectWiFi(ap) }, 'Disconnect')
+            : h('button', { class: 'btn small primary', onclick: () => promptConnect(ap) }, 'Connect');
+
+          return h('div', { class: `device ${ap.in_use ? 'current' : ''}` },
+            h('span', { class: 'device-icon' }, icon('wifi', 18)),
+            h('div', { class: 'device-text' },
+              h('div', { class: 'device-name' }, ap.ssid, ap.in_use ? h('span', { class: 'pill active' }, 'Connected') : null),
+              h('div', { class: 'set-desc' }, `${ap.signal}% signal · ${ap.freq} · ${ap.security}`)),
+            actionBtn);
+        }));
+      } catch (err) {
+        wifiList.replaceChildren(h('div', { class: 'empty-state small' }, 'Wi-Fi scan failed: ' + err.message));
+      } finally {
+        scanBtn.disabled = false;
+      }
+    }
+
+    function promptConnect(ap) {
+      const pwd = h('input', { class: 'input', type: 'password', placeholder: 'Wi-Fi password', autocomplete: 'off' });
+      const errorMsg = h('div', { class: 'form-error' });
+      const connectBtn = h('button', { class: 'btn primary' }, 'Connect');
+
+      const doConnect = async () => {
+        errorMsg.textContent = '';
+        connectBtn.disabled = true;
+        connectBtn.textContent = 'Connecting…';
+        try {
+          await api('POST', '/api/network/wifi/connect', {
+            ssid: ap.ssid,
+            password: pwd.value,
+          });
+          close();
+          toast(`Connected to ${ap.ssid}`);
+          await loadStatus();
+          await scan();
+        } catch (err) {
+          errorMsg.textContent = err.message || 'Failed to connect';
+          connectBtn.disabled = false;
+          connectBtn.textContent = 'Connect';
+        }
+      };
+
+      connectBtn.onclick = doConnect;
+      pwd.addEventListener('keydown', (e) => { if (e.key === 'Enter') doConnect(); });
+
+      const close = dialog({
+        title: `Connect to ${ap.ssid}`,
+        width: '380px',
+        body: h('div', { class: 'set-form' },
+          ap.security === 'Open' ? h('p', { class: 'dialog-text' }, 'This is an open network without a password.') : null,
+          ap.security !== 'Open' ? [h('label', { class: 'field-label' }, 'Password'), pwd] : null,
+          errorMsg),
+        actions: [h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), connectBtn],
+      });
+      requestAnimationFrame(() => pwd.focus());
+    }
+
+    async function disconnectWiFi(ap) {
+      if (!(await confirmDialog(`Disconnect from ${ap.ssid}?`, 'The server will lose this Wi-Fi connection.', 'Disconnect'))) return;
+      try {
+        await api('POST', '/api/network/wifi/disconnect', { device: 'wlan0' });
+        toast(`Disconnected from ${ap.ssid}`);
+        await loadStatus();
+        await scan();
+      } catch (err) {
+        report(err);
+      }
+    }
+
+    const joinOtherBtn = h('button', { class: 'btn small', onclick: () => promptJoinOther() }, icon('plus', 14), 'Join Other Network…');
+
+    function promptJoinOther() {
+      const ssidInput = h('input', { class: 'input', placeholder: 'Network Name (SSID)', autocomplete: 'off' });
+      const pwdInput = h('input', { class: 'input', type: 'password', placeholder: 'Password', autocomplete: 'off' });
+      const hiddenCheck = h('input', { type: 'checkbox', class: 'switch' });
+      const errorMsg = h('div', { class: 'form-error' });
+      const connectBtn = h('button', { class: 'btn primary' }, 'Connect');
+
+      const doJoin = async () => {
+        if (!ssidInput.value.trim()) {
+          errorMsg.textContent = 'Please enter an SSID';
+          return;
+        }
+        errorMsg.textContent = '';
+        connectBtn.disabled = true;
+        connectBtn.textContent = 'Connecting…';
+        try {
+          await api('POST', '/api/network/wifi/connect', {
+            ssid: ssidInput.value.trim(),
+            password: pwdInput.value,
+            hidden: hiddenCheck.checked,
+          });
+          close();
+          toast(`Connected to ${ssidInput.value.trim()}`);
+          await loadStatus();
+          await scan();
+        } catch (err) {
+          errorMsg.textContent = err.message || 'Failed to connect';
+          connectBtn.disabled = false;
+          connectBtn.textContent = 'Connect';
+        }
+      };
+
+      connectBtn.onclick = doJoin;
+      pwdInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(); });
+
+      const close = dialog({
+        title: 'Join Other Network',
+        width: '380px',
+        body: h('div', { class: 'set-form' },
+          h('label', { class: 'field-label' }, 'Network Name (SSID)'), ssidInput,
+          h('label', { class: 'field-label' }, 'Password'), pwdInput,
+          h('label', { class: 'switch-row' },
+            h('span', null, h('b', null, 'Hidden network'), h('span', { class: 'set-desc' }, 'This network does not broadcast its SSID.')),
+            hiddenCheck),
+          errorMsg),
+        actions: [h('button', { class: 'btn', onclick: () => close() }, 'Cancel'), connectBtn],
+      });
+      requestAnimationFrame(() => ssidInput.focus());
+    }
+
+    el.replaceChildren(h('div', { class: 'settings-page' },
+      group('Network Status', 'Current connection and IP configuration of this server.', statusBox),
+      group('Fallback Setup Hotspot', 'Provides emergency Wi-Fi access if your laptop server loses network.', hotspotBox),
+      group('Wi-Fi Networks', 'Available wireless networks detected by this server.', wifiList,
+        h('div', { class: 'hero-actions', style: { marginTop: '12px' } }, scanBtn, joinOtherBtn)),
+      group('Network Interfaces', 'Physical and virtual network adapters installed on the machine.', ifaceList)));
+
+    loadStatus();
+    scan();
+    timer = setInterval(() => { loadStatus(); }, 15_000);
+    return () => clearInterval(timer);
+  }
+
+  function hardware(el) {
+    const btBox = h('div', { class: 'device-list' }, h('div', { class: 'empty-state small' }, 'Checking Bluetooth…'));
+    const btDevList = h('div', { class: 'device-list' });
+    const usbList = h('div', { class: 'device-list' }, h('div', { class: 'empty-state small' }, 'Scanning USB devices…'));
+    const pciList = h('div', { class: 'device-list' });
+    const scanBtn = h('button', { class: 'btn small', onclick: () => scanBT() }, icon('refresh', 14), 'Scan for Bluetooth Devices');
+    let timer = null;
+
+    async function loadStatus() {
+      try {
+        const st = await api('GET', '/api/hardware/status');
+
+        if (!st.bluetooth || !st.bluetooth.available) {
+          btBox.replaceChildren(h('div', { class: 'device' },
+            h('span', { class: 'device-icon' }, icon('bluetooth', 20)),
+            h('div', { class: 'device-text' },
+              h('div', { class: 'device-name' }, 'Bluetooth adapter not detected'),
+              h('div', { class: 'set-desc' }, 'No BlueZ Bluetooth controller was found on this server.'))));
+          btDevList.replaceChildren();
+          scanBtn.disabled = true;
+        } else {
+          scanBtn.disabled = !st.bluetooth.powered;
+          const powerSwitch = h('input', {
+            type: 'checkbox', class: 'switch', checked: st.bluetooth.powered,
+            onchange: async (e) => {
+              try {
+                await api('POST', '/api/hardware/bluetooth/power', { powered: e.target.checked });
+                toast(`Bluetooth turned ${e.target.checked ? 'on' : 'off'}`);
+                await loadStatus();
+              } catch (err) { report(err); }
+            },
+          });
+
+          btBox.replaceChildren(h('div', { class: 'device current' },
+            h('span', { class: 'device-icon' }, icon('bluetooth', 20)),
+            h('div', { class: 'device-text' },
+              h('div', { class: 'device-name' }, st.bluetooth.name || 'Bluetooth Adapter', h('span', { class: `pill ${st.bluetooth.powered ? 'active' : ''}` }, st.bluetooth.powered ? 'Powered On' : 'Powered Off')),
+              h('div', { class: 'set-desc' }, `MAC: ${st.bluetooth.mac || 'Unknown'} · ${st.bluetooth.pairable ? 'Pairable' : 'Not pairable'}`)),
+            h('label', { class: 'switch-row', style: { margin: 0, padding: 0 } }, powerSwitch)));
+
+          if (st.bluetooth_devices && st.bluetooth_devices.length > 0) {
+            btDevList.replaceChildren(...st.bluetooth_devices.map((d) => {
+              const connectBtn = d.connected
+                ? h('button', { class: 'btn small', onclick: () => disconnectBT(d) }, 'Disconnect')
+                : h('button', { class: 'btn small primary', onclick: () => connectBT(d) }, 'Connect');
+              const removeBtn = h('button', { class: 'btn small', onclick: () => removeBT(d) }, icon('trash', 14));
+
+              return h('div', { class: `device ${d.connected ? 'current' : ''}` },
+                h('span', { class: 'device-icon' }, icon('bluetooth', 18)),
+                h('div', { class: 'device-text' },
+                  h('div', { class: 'device-name' }, d.name || d.mac, d.connected ? h('span', { class: 'pill active' }, 'Connected') : d.paired ? h('span', { class: 'pill' }, 'Paired') : null),
+                  h('div', { class: 'set-desc' }, `${d.mac} ${d.trusted ? '· Trusted' : ''}`)),
+                h('div', { class: 'hero-actions' }, connectBtn, removeBtn));
+            }));
+          } else {
+            btDevList.replaceChildren(h('div', { class: 'empty-state small' }, st.bluetooth.powered ? 'No paired devices. Click “Scan” to discover nearby devices.' : 'Bluetooth is powered off.'));
+          }
+        }
+
+        if (st.usb_devices && st.usb_devices.length > 0) {
+          usbList.replaceChildren(...st.usb_devices.map((u) => {
+            let uIcon = 'usb';
+            if (u.category === 'Storage') uIcon = 'hardDrive';
+            else if (u.category === 'Audio') uIcon = 'volume';
+            else if (u.category === 'Input') uIcon = 'sliders';
+
+            return h('div', { class: 'device' },
+              h('span', { class: 'device-icon' }, icon(uIcon, 18)),
+              h('div', { class: 'device-text' },
+                h('div', { class: 'device-name' }, u.description, h('span', { class: 'pill' }, u.category)),
+                h('div', { class: 'set-desc' }, `ID: ${u.id} · Bus ${u.bus} Device ${u.device}`)));
+          }));
+        } else {
+          usbList.replaceChildren(h('div', { class: 'empty-state small' }, 'No external USB devices detected.'));
+        }
+
+        if (st.pci_devices && st.pci_devices.length > 0) {
+          pciList.replaceChildren(...st.pci_devices.map((p) => {
+            return h('div', { class: 'device' },
+              h('span', { class: 'device-icon' }, icon('cpu', 18)),
+              h('div', { class: 'device-text' },
+                h('div', { class: 'device-name' }, p.description, h('span', { class: 'pill' }, p.class)),
+                h('div', { class: 'set-desc' }, `Slot: ${p.slot}`)));
+          }));
+        } else {
+          pciList.replaceChildren(h('div', { class: 'empty-state small' }, 'No PCI controllers enumerated.'));
+        }
+      } catch (err) {
+        report(err);
+      }
+    }
+
+    async function scanBT() {
+      scanBtn.disabled = true;
+      scanBtn.textContent = 'Scanning (5s)…';
+      try {
+        const { devices } = await api('POST', '/api/hardware/bluetooth/scan');
+        toast(`Found ${devices ? devices.length : 0} Bluetooth devices`);
+        await loadStatus();
+      } catch (err) {
+        report(err);
+      } finally {
+        scanBtn.disabled = false;
+        scanBtn.replaceChildren(icon('refresh', 14), 'Scan for Bluetooth Devices');
+      }
+    }
+
+    async function connectBT(d) {
+      try {
+        await api('POST', '/api/hardware/bluetooth/connect', { mac: d.mac });
+        toast(`Connected to ${d.name || d.mac}`);
+        await loadStatus();
+      } catch (err) {
+        report(err);
+      }
+    }
+
+    async function disconnectBT(d) {
+      try {
+        await api('POST', '/api/hardware/bluetooth/disconnect', { mac: d.mac });
+        toast(`Disconnected from ${d.name || d.mac}`);
+        await loadStatus();
+      } catch (err) {
+        report(err);
+      }
+    }
+
+    async function removeBT(d) {
+      if (!(await confirmDialog(`Unpair ${d.name || d.mac}?`, 'This Bluetooth device will be removed from known devices.', 'Unpair'))) return;
+      try {
+        await api('POST', '/api/hardware/bluetooth/remove', { mac: d.mac });
+        toast(`Unpaired ${d.name || d.mac}`);
+        await loadStatus();
+      } catch (err) {
+        report(err);
+      }
+    }
+
+    el.replaceChildren(h('div', { class: 'settings-page' },
+      group('Bluetooth Controller', 'Manage laptop Bluetooth radio and settings.', btBox),
+      group('Bluetooth Devices', 'Paired wireless headphones, speakers, keyboards, and accessories.', btDevList,
+        h('div', { class: 'hero-actions', style: { marginTop: '12px' } }, scanBtn)),
+      group('Connected USB Devices', 'Plugged in flash drives, external hard disks, USB soundcards, and peripherals.', usbList),
+      group('Internal PCI & GPU Controllers', 'Onboard graphics chipsets, network controllers, and motherboard buses.', pciList)));
+
+    loadStatus();
+    timer = setInterval(loadStatus, 20_000);
+    return () => clearInterval(timer);
+  }
+
   function account(el) {
     const cur = h('input', { class: 'input', type: 'password', autocomplete: 'current-password' });
     const next = h('input', { class: 'input', type: 'password', autocomplete: 'new-password' });
@@ -96,10 +626,10 @@ function mountSettings(win, args) {
         submit.disabled = false;
       },
     },
-    h('label', { class: 'field-label' }, 'Current password'), cur,
-    h('label', { class: 'field-label' }, 'New password (at least 10 characters)'), next,
-    h('label', { class: 'field-label' }, 'Confirm new password'), again,
-    error, submit);
+      h('label', { class: 'field-label' }, 'Current password'), cur,
+      h('label', { class: 'field-label' }, 'New password (at least 10 characters)'), next,
+      h('label', { class: 'field-label' }, 'Confirm new password'), again,
+      error, submit);
     el.replaceChildren(h('div', { class: 'settings-page' },
       group('Signed in as', null, h('div', { class: 'account-card' },
         h('span', { class: 'avatar' }, (window.ultraspaceUser?.username || '?').slice(0, 1).toUpperCase()),

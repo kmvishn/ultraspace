@@ -42,8 +42,10 @@ func (f *Files) SetThumbDir(dir string) { f.thumbDir = dir }
 func (f *Files) SetSources(r *mediasrc.Registry) { f.sources = r }
 
 func New(dir string, log *slog.Logger) (*Files, error) {
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return nil, err
+	if dir != "/" && dir != "" {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return nil, err
+		}
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
@@ -64,6 +66,9 @@ func (f *Files) Register(mux *http.ServeMux, auth func(http.Handler) http.Handle
 	handle("POST /api/files/delete", f.handleDelete)
 	handle("POST /api/files/write", f.handleWrite)
 	handle("GET /api/files/search", f.handleSearch)
+	handle("GET /api/files/drives", f.handleDrives)
+	handle("GET /api/files/places", f.handlePlaces)
+	handle("GET /api/files/stat", f.handleStat)
 	f.registerPhotos(handle)
 	f.registerMedia(handle)
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -114,6 +115,9 @@ func (c *Config) Finalize() error {
 	}
 	if c.FilesRoot == "" {
 		c.FilesRoot = filepath.Join(c.DataDir, "files")
+	}
+	if c.FilesRoot == "/" && c.Torrent.Folder == "Torrents" {
+		c.Torrent.Folder = strings.TrimPrefix(filepath.ToSlash(filepath.Join(c.DataDir, "torrents")), "/")
 	}
 	if c.SessionTTL.Duration < time.Minute {
 		return errors.New("session_ttl must be at least 1m")

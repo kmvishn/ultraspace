@@ -15,15 +15,19 @@ import (
 
 	"ultraspace/internal/agent"
 	"ultraspace/internal/aichat"
+	"ultraspace/internal/audio"
 	"ultraspace/internal/auth"
 	"ultraspace/internal/browser"
 	"ultraspace/internal/clip"
 	"ultraspace/internal/config"
 	"ultraspace/internal/files"
+	"ultraspace/internal/hardware"
 	"ultraspace/internal/httpx"
 	"ultraspace/internal/mediasrc"
 	"ultraspace/internal/monitor"
 	"ultraspace/internal/navidrome"
+	"ultraspace/internal/network"
+	"ultraspace/internal/power"
 	"ultraspace/internal/remote"
 	"ultraspace/internal/services"
 	"ultraspace/internal/state"
@@ -108,12 +112,20 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 	if tm != nil {
 		go tm.Run(ctx)
 	}
+	net := network.New(log)
+	if net.Hotspot() != nil {
+		go net.Hotspot().Run(ctx)
+	}
 
 	mux := http.NewServeMux()
 	a.Register(mux)
 	fm.Register(mux, a.Require)
 	mon.Register(mux, a.Require)
 	services.New(log).Register(mux, a.Require)
+	net.Register(mux, a.Require)
+	audio.New(log).Register(mux, a.Require)
+	power.New(log).Register(mux, a.Require)
+	hardware.New(log).Register(mux, a.Require)
 	state.New(st, log).Register(mux, a.Require)
 	browser.New(log).Register(mux, a.Require)
 	rb.Register(mux, a.Require)

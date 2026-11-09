@@ -67,6 +67,9 @@ function mountSystem(win, args) {
         { values: pts.map((p) => p.tx), color: '#f472b6', fill: false },
       ]);
     };
+    let powerInfo = null;
+    api('GET', '/api/power/status').then((p) => { powerInfo = p; update(system.latest); }).catch(() => {});
+
     const update = (s) => {
       if (!s) return;
       const memPct = (100 * s.memory.used) / s.memory.total;
@@ -92,6 +95,14 @@ function mountSystem(win, args) {
         ['Hostname', s.hostname], ['Operating system', s.os], ['Kernel', s.kernel], ['Uptime', fmtDuration(s.uptime)],
         ['ultraspace', `v${s.app.version} · ${fmtBytes(s.app.rss)} RAM`], ['Running since', fmtDate(s.app.started)],
       ];
+      if (powerInfo) {
+        if (powerInfo.has_battery) {
+          kv.push(['Battery', `${powerInfo.percent}% (${powerInfo.status}) · AC ${powerInfo.ac_online ? 'connected' : 'offline'}`]);
+        }
+        if (powerInfo.temperature_c > 0) {
+          kv.push(['CPU Temperature', `${powerInfo.temperature_c.toFixed(1)} °C`]);
+        }
+      }
       info.replaceChildren(...kv.flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v)]));
       draw();
     };

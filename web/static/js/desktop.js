@@ -146,15 +146,38 @@ function menuBar(user, onSignOut) {
     class: 'mb-item mb-stat', title: label, onclick: () => openApp('system'),
   }, icon(iconName, 14), val);
 
+  const soundBtn = h('button', { class: 'mb-item', 'aria-label': 'Sound', title: 'Sound & Audio', onclick: () => openApp('settings', { section: 'sound' }) }, icon('volume', 15));
+  const wifiBtn = h('button', { class: 'mb-item', 'aria-label': 'Network', title: 'Network & Wi-Fi', onclick: () => openApp('settings', { section: 'network' }) }, icon('wifi', 15));
+  const batBtn = h('button', { class: 'mb-item hidden', 'aria-label': 'Battery', title: 'Battery', onclick: () => openApp('system') }, icon('battery', 15), h('span', { class: 'mb-val' }, '–'));
+
   const bar = h('header', { class: 'menubar glass' },
     logo, appName,
     h('div', { class: 'mb-spacer' }),
     nowPlaying,
     h('div', { class: 'mb-stats' }, stat('cpu', cpu, 'CPU'), stat('memory', mem, 'Memory'), stat('arrowDown', net, 'Network')),
+    soundBtn,
+    wifiBtn,
+    batBtn,
     h('button', { class: 'mb-item mb-clip', 'aria-label': 'Shared clipboard', title: 'Shared clipboard', onclick: (e) => togglePanel(e.currentTarget) }, icon('clipboard', 15)),
     h('button', { class: 'mb-item', 'aria-label': 'Search', title: 'Search (Ctrl K)', onclick: openLauncher }, icon('search', 15)),
     h('button', { class: 'mb-item', onclick: () => openApp('settings', { section: 'account' }) }, icon('user', 15), h('span', { class: 'mb-user' }, user.username)),
     clock);
+
+  const updatePower = async () => {
+    try {
+      const p = await api('GET', '/api/power/status');
+      if (p.has_battery) {
+        batBtn.classList.remove('hidden');
+        batBtn.replaceChildren(icon('battery', 15), h('span', { class: 'mb-val' }, `${p.percent}%`));
+        batBtn.title = `Battery: ${p.percent}% (${p.status})${p.temperature_c ? ` · CPU: ${p.temperature_c.toFixed(1)}°C` : ''}`;
+      } else {
+        batBtn.classList.add('hidden');
+      }
+    } catch (_) {}
+  };
+  updatePower();
+  const pTimer = setInterval(updatePower, 30_000);
+  cleanup.push(() => clearInterval(pTimer));
 
   const fmtTime = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   const tick = () => { clock.textContent = fmtTime.format(new Date()).replace(',', ''); };
