@@ -219,10 +219,10 @@ func Run(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
-	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(sctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+		_ = srv.Close()
 	}
 	return nil
 }
