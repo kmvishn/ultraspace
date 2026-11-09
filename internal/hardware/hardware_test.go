@@ -210,7 +210,7 @@ func TestBluetoothActions(t *testing.T) {
 	mu.Unlock()
 
 	// Connect
-	_ = hw.ConnectBluetooth(context.Background(), "AA:BB:CC")
+	_ = hw.ConnectBluetooth(context.Background(), "AA:BB:CC:DD:EE:FF")
 	mu.Lock()
 	if !strings.Contains(capturedCmd, "connect") {
 		t.Errorf("cmd = %q", capturedCmd)
@@ -218,7 +218,7 @@ func TestBluetoothActions(t *testing.T) {
 	mu.Unlock()
 
 	// Disconnect
-	_ = hw.DisconnectBluetooth(context.Background(), "AA:BB:CC")
+	_ = hw.DisconnectBluetooth(context.Background(), "AA:BB:CC:DD:EE:FF")
 	mu.Lock()
 	if !strings.Contains(capturedCmd, "disconnect") {
 		t.Errorf("cmd = %q", capturedCmd)
@@ -226,7 +226,7 @@ func TestBluetoothActions(t *testing.T) {
 	mu.Unlock()
 
 	// Pair
-	_ = hw.PairBluetooth(context.Background(), "AA:BB:CC")
+	_ = hw.PairBluetooth(context.Background(), "AA:BB:CC:DD:EE:FF")
 	mu.Lock()
 	if !strings.Contains(capturedCmd, "connect") { // last step in pair
 		t.Errorf("cmd = %q", capturedCmd)
@@ -234,12 +234,20 @@ func TestBluetoothActions(t *testing.T) {
 	mu.Unlock()
 
 	// Remove
-	_ = hw.RemoveBluetooth(context.Background(), "AA:BB:CC")
+	_ = hw.RemoveBluetooth(context.Background(), "AA:BB:CC:DD:EE:FF")
 	mu.Lock()
 	if !strings.Contains(capturedCmd, "remove") {
 		t.Errorf("cmd = %q", capturedCmd)
 	}
 	mu.Unlock()
+
+	// Reject invalid MACs
+	if err := hw.ConnectBluetooth(context.Background(), "invalid-mac-address"); err == nil {
+		t.Errorf("expected error for invalid MAC")
+	}
+	if err := hw.ConnectBluetooth(context.Background(), "00:11;rm -rf /"); err == nil {
+		t.Errorf("expected error for injection MAC")
+	}
 }
 
 func TestHardwareHTTPHandlers(t *testing.T) {

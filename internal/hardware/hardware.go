@@ -360,10 +360,17 @@ func (h *Hardware) ScanBluetooth(ctx context.Context) ([]BluetoothDevice, error)
 	return devs, nil
 }
 
+var macRegex = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
+
+func isValidMAC(mac string) bool {
+	return macRegex.MatchString(strings.TrimSpace(mac))
+}
+
 // ConnectBluetooth connects to a Bluetooth device.
 func (h *Hardware) ConnectBluetooth(ctx context.Context, mac string) error {
-	if mac == "" {
-		return errors.New("mac address required")
+	mac = strings.TrimSpace(mac)
+	if !isValidMAC(mac) {
+		return errors.New("invalid MAC address format")
 	}
 	out, err := h.runner.CombinedOutput(ctx, "bluetoothctl", "connect", mac)
 	if err != nil {
@@ -374,8 +381,9 @@ func (h *Hardware) ConnectBluetooth(ctx context.Context, mac string) error {
 
 // DisconnectBluetooth disconnects an active Bluetooth connection.
 func (h *Hardware) DisconnectBluetooth(ctx context.Context, mac string) error {
-	if mac == "" {
-		return errors.New("mac address required")
+	mac = strings.TrimSpace(mac)
+	if !isValidMAC(mac) {
+		return errors.New("invalid MAC address format")
 	}
 	out, err := h.runner.CombinedOutput(ctx, "bluetoothctl", "disconnect", mac)
 	if err != nil {
@@ -386,8 +394,9 @@ func (h *Hardware) DisconnectBluetooth(ctx context.Context, mac string) error {
 
 // PairBluetooth pairs and trusts a Bluetooth device.
 func (h *Hardware) PairBluetooth(ctx context.Context, mac string) error {
-	if mac == "" {
-		return errors.New("mac address required")
+	mac = strings.TrimSpace(mac)
+	if !isValidMAC(mac) {
+		return errors.New("invalid MAC address format")
 	}
 	out, err := h.runner.CombinedOutput(ctx, "bluetoothctl", "pair", mac)
 	if err != nil {
@@ -400,8 +409,9 @@ func (h *Hardware) PairBluetooth(ctx context.Context, mac string) error {
 
 // RemoveBluetooth unpairs and removes a Bluetooth device.
 func (h *Hardware) RemoveBluetooth(ctx context.Context, mac string) error {
-	if mac == "" {
-		return errors.New("mac address required")
+	mac = strings.TrimSpace(mac)
+	if !isValidMAC(mac) {
+		return errors.New("invalid MAC address format")
 	}
 	out, err := h.runner.CombinedOutput(ctx, "bluetoothctl", "remove", mac)
 	if err != nil {

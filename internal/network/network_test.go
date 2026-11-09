@@ -193,6 +193,11 @@ func TestConnectWiFi(t *testing.T) {
 		t.Error("expected error for empty SSID")
 	}
 
+	// Invalid SSID with control character
+	if err := net.ConnectWiFi(context.Background(), ConnectRequest{SSID: "Bad\nSSID"}); err == nil {
+		t.Error("expected error for SSID with newline")
+	}
+
 	// Bad password
 	err := net.ConnectWiFi(context.Background(), ConnectRequest{SSID: "WrongPassword", Password: "bad"})
 	if err == nil || !strings.Contains(err.Error(), "incorrect Wi-Fi password") {

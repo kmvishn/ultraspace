@@ -100,6 +100,7 @@ type Config struct {
 	Upstreams []string `json:"upstreams"`
 	Whitelist []string `json:"whitelist"`
 	Blacklist []string `json:"blacklist"`
+	OnlyLocal *bool    `json:"only_local,omitempty"`
 }
 
 // Server is the DNS sinkhole manager.
@@ -110,6 +111,7 @@ type Server struct {
 	configFile   string
 	enabled      bool
 	port         int
+	onlyLocal    bool
 	upstreams    []string
 	rules        map[string]struct{}
 	whitelist    map[string]struct{}
@@ -132,6 +134,7 @@ func New(dataDir string, log *slog.Logger) *Server {
 		dataDir:    dataDir,
 		configFile: filepath.Join(dataDir, "sinkhole.json"),
 		port:       53,
+		onlyLocal:  true,
 		upstreams:  DefaultUpstreams,
 		rules:      make(map[string]struct{}),
 		whitelist:  make(map[string]struct{}),
@@ -170,6 +173,9 @@ func (s *Server) loadConfig() {
 		return
 	}
 	s.enabled = cfg.Enabled
+	if cfg.OnlyLocal != nil {
+		s.onlyLocal = *cfg.OnlyLocal
+	}
 	if cfg.Port > 0 {
 		s.port = cfg.Port
 	}
@@ -191,10 +197,12 @@ func (s *Server) saveConfig() error {
 	}
 	_ = os.MkdirAll(s.dataDir, 0o750)
 
+	onlyLocal := s.onlyLocal
 	cfg := Config{
 		Enabled:   s.enabled,
 		Port:      s.port,
 		Upstreams: s.upstreams,
+		OnlyLocal: &onlyLocal,
 	}
 	for d := range s.whitelist {
 		cfg.Whitelist = append(cfg.Whitelist, d)
@@ -296,9 +304,25 @@ func (s *Server) IsBlocked(domain string) bool {
 	return false
 }
 
+var bufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 4096)
+		return &b
+	},
+}
+
+// isAllowedClient checks if a client IP is allowed to query the DNS sinkhole.
+// When onlyLocal is enabled, queries from public WAN addresses are dropped to prevent open-resolver abuse.
+func isAllowedClient(clientIP string) bool {
+	ip := net.ParseIP(clientIP)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
 // serveUDP listens for incoming DNS packets and dispatches them.
 func (s *Server) serveUDP(ctx context.Context, conn net.PacketConn) {
-	buf := make([]byte, 4096)
 	for {
 		select {
 		case <-ctx.Done():
@@ -306,23 +330,34 @@ func (s *Server) serveUDP(ctx context.Context, conn net.PacketConn) {
 		default:
 		}
 
-		n, clientAddr, err := conn.ReadFrom(buf)
+		bp := bufPool.Get().(*[]byte)
+		n, clientAddr, err := conn.ReadFrom(*bp)
 		if err != nil {
+			bufPool.Put(bp)
 			if errors.Is(err, net.ErrClosed) || ctx.Err() != nil {
 				return
 			}
 			continue
 		}
 
-		reqBytes := make([]byte, n)
-		copy(reqBytes, buf[:n])
-
-		go s.handlePacket(conn, clientAddr, reqBytes)
+		go func(addr net.Addr, bPtr *[]byte, length int) {
+			defer bufPool.Put(bPtr)
+			s.handlePacket(conn, addr, (*bPtr)[:length])
+		}(clientAddr, bp, n)
 	}
 }
 
 // handlePacket parses, filters, and responds to or forwards a DNS query.
 func (s *Server) handlePacket(conn net.PacketConn, clientAddr net.Addr, reqBytes []byte) {
+	clientIP, _, _ := net.SplitHostPort(clientAddr.String())
+	if clientIP == "" {
+		clientIP = clientAddr.String()
+	}
+
+	if s.onlyLocal && !isAllowedClient(clientIP) {
+		return
+	}
+
 	start := time.Now()
 	var msg dnsmessage.Message
 	if err := msg.Unpack(reqBytes); err != nil || len(msg.Questions) == 0 {
@@ -332,10 +367,6 @@ func (s *Server) handlePacket(conn net.PacketConn, clientAddr net.Addr, reqBytes
 	q := msg.Questions[0]
 	qName := q.Name.String()
 	cleanName := normalizeDomain(qName)
-	clientIP, _, _ := net.SplitHostPort(clientAddr.String())
-	if clientIP == "" {
-		clientIP = clientAddr.String()
-	}
 
 	qType := q.Type.String()
 	blocked := s.IsBlocked(cleanName)

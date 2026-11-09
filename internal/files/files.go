@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"ultraspace/internal/httpx"
@@ -28,11 +29,14 @@ import (
 var errBadPath = errors.New("invalid path")
 
 type Files struct {
-	root     *os.Root
-	log      *slog.Logger
-	thumbDir string // thumbnail cache; empty disables caching
-	photos   photoCache
-	sources  *mediasrc.Registry // torrents and addon streams for the video player
+	root         *os.Root
+	log          *slog.Logger
+	thumbDir     string // thumbnail cache; empty disables caching
+	photos       photoCache
+	sources      *mediasrc.Registry // torrents and addon streams for the video player
+	drivesMu     sync.RWMutex
+	cachedDrives []Drive
+	drivesAt     time.Time
 }
 
 // SetThumbDir sets where generated thumbnails are cached.

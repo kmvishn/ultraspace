@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"ultraspace/internal/httpx"
 )
@@ -136,13 +137,31 @@ func ParseMounts(r []byte) []Drive {
 	return drives
 }
 
-// GetDrives returns all physical and external storage volumes mounted on the host.
+// GetDrives returns all physical and external storage volumes mounted on the host, cached for 5 seconds.
 func (f *Files) GetDrives() []Drive {
+	f.drivesMu.RLock()
+	if time.Since(f.drivesAt) < 5*time.Second && len(f.cachedDrives) > 0 {
+		cached := f.cachedDrives
+		f.drivesMu.RUnlock()
+		return cached
+	}
+	f.drivesMu.RUnlock()
+
+	f.drivesMu.Lock()
+	defer f.drivesMu.Unlock()
+
+	if time.Since(f.drivesAt) < 5*time.Second && len(f.cachedDrives) > 0 {
+		return f.cachedDrives
+	}
+
 	raw, err := readProcMounts()
-	if err != nil {
+	if err != nil && f.log != nil {
 		f.log.Debug("read proc mounts failed", "err", err)
 	}
-	return ParseMounts(raw)
+	drives := ParseMounts(raw)
+	f.cachedDrives = drives
+	f.drivesAt = time.Now()
+	return drives
 }
 
 // GetPlaces generates standard native file explorer shortcuts.

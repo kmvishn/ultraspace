@@ -199,6 +199,14 @@ func TestSetSinkAndVolume(t *testing.T) {
 		t.Errorf("capturedMute = %q, want 1", capturedMute)
 	}
 	mu.Unlock()
+
+	// Reject invalid sink names
+	if err := audioSvc.SetDefaultSink(context.Background(), "bad\nsink"); err == nil {
+		t.Errorf("expected error for sink name with newline")
+	}
+	if err := audioSvc.SetVolume(context.Background(), "bad\nsink", 50); err == nil {
+		t.Errorf("expected error for sink name with newline in SetVolume")
+	}
 }
 
 func TestPlayTestSound(t *testing.T) {

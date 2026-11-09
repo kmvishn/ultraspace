@@ -206,6 +206,7 @@ func Run(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20, // 1 MB header size limit
 		// No read/write timeouts: uploads and downloads can be large and slow.
 	}
 	errc := make(chan error, 1)
@@ -234,6 +235,9 @@ const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inl
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
 		if strings.HasPrefix(r.URL.Path, "/code/") {
 			// VS Code brings its own CSP; the agent proxy adds frame-ancestors 'self'.
 			h.Set("X-Content-Type-Options", "nosniff")
@@ -246,6 +250,8 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
+		h.Set("Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()")
 		next.ServeHTTP(w, r)
 	})
 }

@@ -238,3 +238,37 @@ func TestStartStop(t *testing.T) {
 	s.Stop()
 }
 
+func TestAllowedClient(t *testing.T) {
+	// Private / local addresses must be allowed
+	allowed := []string{
+		"127.0.0.1",
+		"10.0.0.15",
+		"172.16.5.2",
+		"192.168.1.100",
+		"169.254.1.1",
+		"::1",
+		"fd00::1",
+		"fe80::1",
+	}
+	for _, ip := range allowed {
+		if !isAllowedClient(ip) {
+			t.Errorf("expected %s to be allowed local client", ip)
+		}
+	}
+
+	// Public WAN addresses must be denied
+	denied := []string{
+		"8.8.8.8",
+		"1.1.1.1",
+		"140.245.194.129",
+		"208.67.222.222",
+		"2606:4700:4700::1111",
+		"not-an-ip",
+	}
+	for _, ip := range denied {
+		if isAllowedClient(ip) {
+			t.Errorf("expected %s to be denied public client", ip)
+		}
+	}
+}
+

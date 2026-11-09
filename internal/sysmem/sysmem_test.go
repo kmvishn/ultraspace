@@ -13,4 +13,7 @@ func TestReadAndPick(t *testing.T) {
 	if p := Pick("auto"); p.Name == "" {
 		t.Fatalf("auto picked nothing")
 	}
+	TuneRuntime(Pick("tiny"))
+	TuneRuntime(Pick("small"))
+	TuneRuntime(Pick("normal"))
 }

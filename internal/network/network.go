@@ -343,15 +343,25 @@ func (n *Network) ScanWiFi(ctx context.Context, rescan bool) ([]WiFiAccessPoint,
 
 // ConnectWiFi connects to a Wi-Fi network.
 func (n *Network) ConnectWiFi(ctx context.Context, req ConnectRequest) error {
-	if strings.TrimSpace(req.SSID) == "" {
+	ssid := strings.TrimSpace(req.SSID)
+	if ssid == "" {
 		return errors.New("SSID cannot be empty")
+	}
+	if len(ssid) > 64 || strings.ContainsAny(ssid, "\r\n\x00") {
+		return errors.New("invalid SSID format or length")
+	}
+	if len(req.Password) > 128 || strings.ContainsAny(req.Password, "\r\n\x00") {
+		return errors.New("invalid password format or length")
+	}
+	if req.Device != "" && (len(req.Device) > 32 || strings.ContainsAny(req.Device, " /\\;\r\n\x00")) {
+		return errors.New("invalid device name")
 	}
 
 	if n.hotspot != nil && n.hotspot.active {
 		_ = n.hotspot.StopHotspot(ctx)
 	}
 
-	args := []string{"dev", "wifi", "connect", req.SSID}
+	args := []string{"dev", "wifi", "connect", ssid}
 	if req.Password != "" {
 		args = append(args, "password", req.Password)
 	}

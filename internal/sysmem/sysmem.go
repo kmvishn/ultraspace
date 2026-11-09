@@ -5,6 +5,7 @@ package sysmem
 import (
 	"bufio"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 )
@@ -84,4 +85,25 @@ func Pick(name string) Profile {
 // kills it (and the children it starts later) before sshd, nginx or ultraspace itself.
 func PreferOOMKill(pid, score int) {
 	_ = os.WriteFile("/proc/"+strconv.Itoa(pid)+"/oom_score_adj", []byte(strconv.Itoa(score)), 0)
+}
+
+// TuneRuntime configures Go runtime memory limits and GC targets based on the host's memory profile.
+func TuneRuntime(p Profile) {
+	total := Read().Total
+	switch p.Name {
+	case "tiny":
+		// Small machines (e.g. 512MB RAM): cap Go heap memory to ~180MB and collect at 70% growth
+		debug.SetMemoryLimit(180 << 20)
+		debug.SetGCPercent(70)
+	case "small":
+		// Machines with ~1GB-1.5GB RAM: cap Go heap memory to ~380MB and collect at 80% growth
+		debug.SetMemoryLimit(380 << 20)
+		debug.SetGCPercent(80)
+	default:
+		// Normal machines: if total RAM is known, soft-limit heap to 75% of total RAM
+		if total > 0 {
+			limit := int64((total * 3) / 4)
+			debug.SetMemoryLimit(limit)
+		}
+	}
 }

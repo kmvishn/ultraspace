@@ -217,8 +217,12 @@ func (a *Audio) GetStatus(ctx context.Context) (*Status, error) {
 
 // SetDefaultSink changes the system-wide default audio output sink.
 func (a *Audio) SetDefaultSink(ctx context.Context, sinkName string) error {
+	sinkName = strings.TrimSpace(sinkName)
 	if sinkName == "" {
 		return errors.New("sink name required")
+	}
+	if len(sinkName) > 128 || strings.ContainsAny(sinkName, "\r\n\x00") {
+		return errors.New("invalid sink name")
 	}
 	out, err := a.runner.CombinedOutput(ctx, "pactl", "set-default-sink", sinkName)
 	if err != nil {
@@ -238,6 +242,8 @@ func (a *Audio) SetVolume(ctx context.Context, sinkName string, percent int) err
 	target := sinkName
 	if target == "" {
 		target = "@DEFAULT_SINK@"
+	} else if len(target) > 128 || strings.ContainsAny(target, "\r\n\x00") {
+		return errors.New("invalid sink name")
 	}
 
 	volArg := fmt.Sprintf("%d%%", percent)
@@ -253,6 +259,8 @@ func (a *Audio) SetMute(ctx context.Context, sinkName string, mute bool) error {
 	target := sinkName
 	if target == "" {
 		target = "@DEFAULT_SINK@"
+	} else if len(target) > 128 || strings.ContainsAny(target, "\r\n\x00") {
+		return errors.New("invalid sink name")
 	}
 
 	muteArg := "0"

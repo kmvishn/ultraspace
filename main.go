@@ -67,6 +67,7 @@ func main() {
 		log.Error("invalid config", "err", err)
 		os.Exit(1)
 	}
+	sysmem.TuneRuntime(sysmem.Pick(cfg.MemoryProfile))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
