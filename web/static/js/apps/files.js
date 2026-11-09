@@ -477,6 +477,7 @@ function mountFiles(win, args) {
   return {
     onArgs(a) { if (a.path) navigate(a.path); },
     saveState: () => ({ path }),
+    onDestroy() { clearTimeout(searchTimer); },
   };
 }
 

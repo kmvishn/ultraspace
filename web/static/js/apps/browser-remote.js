@@ -594,6 +594,8 @@ export function mountRemote(win, args, { swap }) {
     onArgs(a) { if (a.open) { const t = webTarget(a.open); if (t?.url) send({ t: 'newtab', url: t.url }); else if (t?.search) send({ t: 'newtab', url: (ENGINES[data.value.engine] || ENGINES.google).search(t.search, false) }); } },
     onFocus() { sendViewport(); data.refresh(); if (document.activeElement !== addr) sink.focus({ preventScroll: true }); },
     onResize: resized,
+    stopMedia() { sound.stop(); },
+    onClose() { sound.stop(); },
     onDestroy() {
       destroyed = true;
       clearTimeout(retryTimer);

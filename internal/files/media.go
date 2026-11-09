@@ -101,6 +101,7 @@ func (in *input) command(ctx context.Context, bin string, args ...string) *exec.
 		}
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.WaitDelay = 500 * time.Millisecond
 	if in.file != nil {
 		cmd.ExtraFiles = []*os.File{in.file}
 	}

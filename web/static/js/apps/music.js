@@ -5,7 +5,7 @@ import { registerApp } from '../wm.js';
 import { nd } from './music-navidrome.js';
 
 registerApp({
-  id: 'music', name: 'Music', icon: 'music', color: ['#fb7185', '#e11d48'], width: 1080, height: 700, minWidth: 520,
+  id: 'music', name: 'Music', icon: 'music', color: ['#fb7185', '#e11d48'], width: 1080, height: 700, minWidth: 520, single: true,
   mount(win, args) { return mountMusic(win, args); },
 });
 
@@ -758,17 +758,27 @@ function mountMusic(win, args) {
         time: t ? Math.floor(pendingSeek ?? audio.currentTime) : 0,
       };
     },
+    stopMedia() {
+      try {
+        if (!audio.paused) audio.pause();
+        audio.removeAttribute('src');
+        audio.load();
+      } catch {}
+      try { emit('music', null); } catch {}
+    },
     onDestroy() {
-      audio.pause();
-      audio.removeAttribute('src');
-      audio.load();
-      emit('music', null);
+      try {
+        if (!audio.paused) audio.pause();
+        audio.removeAttribute('src');
+        audio.load();
+      } catch {}
+      try { emit('music', null); } catch {}
       if ('mediaSession' in navigator) {
         // Media keys and lock-screen controls must not drive a closed player.
         for (const a of ['play', 'pause', 'nexttrack', 'previoustrack', 'seekbackward', 'seekforward']) {
           try { navigator.mediaSession.setActionHandler(a, null); } catch { /* unsupported action */ }
         }
-        navigator.mediaSession.metadata = null;
+        try { navigator.mediaSession.metadata = null; } catch {}
       }
     },
   };

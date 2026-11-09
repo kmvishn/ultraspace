@@ -274,19 +274,23 @@ function mountTorrents(win, args) {
 
   // ---------- polling ----------
 
+  let destroyed = false;
+
   async function refresh() {
-    api('GET', '/api/downloads').then((r) => { web = r.downloads || []; if (filter === 'web') render(); }).catch(() => {});
+    if (destroyed) return;
+    api('GET', '/api/downloads').then((r) => { if (!destroyed) { web = r.downloads || []; if (filter === 'web') render(); } }).catch(() => {});
     try {
       data = await api('GET', '/api/torrents');
       disabled = '';
     } catch (err) {
       if (err.status === 501) disabled = err.message; else return;
     }
+    if (destroyed) return;
     if (selected && !data.torrents.some((t) => t.hash === selected)) selected = null;
     render();
     if (selected && (!detail || detail.torrent?.hash !== selected || ++ticks % 4 === 0)) loadDetail();
   }
-  const poll = () => { if (!document.hidden) refresh(); };
+  const poll = () => { if (!document.hidden && !destroyed) refresh(); };
   timer = setInterval(poll, 2000);
   refresh();
   if (args.path) addFromLibrary(args.path);
@@ -296,6 +300,9 @@ function mountTorrents(win, args) {
     onArgs(a) { if (a.path) addFromLibrary(a.path); if (a.magnet) addMagnet(a.magnet); if (a.filter) { filter = a.filter; refresh(); } },
     onFocus() { refresh(); },
     saveState: () => ({ filter, selected }),
-    onDestroy() { clearInterval(timer); },
+    onDestroy() {
+      destroyed = true;
+      clearInterval(timer);
+    },
   };
 }

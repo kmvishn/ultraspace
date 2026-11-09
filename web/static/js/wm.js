@@ -191,14 +191,61 @@ class Win {
   }
 
   async close() {
-    if (this.handle.onClose && (await this.handle.onClose()) === false) return;
+    if (this._closing) return;
+    try {
+      if (this.handle.onClose && (await this.handle.onClose()) === false) return;
+    } catch (err) {
+      console.error(`Error in onClose for app ${this.app.id}:`, err);
+    }
+    this._closing = true;
+    this.stopMedia();
     this.el.classList.add('closing');
     setTimeout(() => this.destroy(), 160);
   }
 
+  stopMedia() {
+    try {
+      if (document.pictureInPictureElement && this.el.contains(document.pictureInPictureElement)) {
+        document.exitPictureInPicture().catch(() => {});
+      }
+    } catch {}
+    try {
+      this.el.querySelectorAll('video, audio').forEach((m) => {
+        try {
+          if (!m.paused) m.pause();
+          m.muted = true;
+          if (document.pictureInPictureElement === m) {
+            document.exitPictureInPicture().catch(() => {});
+          }
+          m.removeAttribute('src');
+          m.load();
+        } catch {}
+      });
+      this.el.querySelectorAll('iframe').forEach((f) => {
+        try {
+          f.src = 'about:blank';
+        } catch {}
+      });
+    } catch {}
+    try {
+      this.handle?.stopMedia?.();
+    } catch {}
+  }
+
   destroy() {
-    this.handle.onDestroy?.();
-    this.el.remove();
+    this.stopMedia();
+    if (this.handle && typeof this.handle.onDestroy === 'function') {
+      try {
+        this.handle.onDestroy();
+      } catch (err) {
+        console.error(`Error in onDestroy for app ${this.app.id}:`, err);
+      }
+    }
+    try {
+      this.el.remove();
+    } catch (err) {
+      console.error('Error removing window element:', err);
+    }
     const i = windows.indexOf(this);
     if (i >= 0) windows.splice(i, 1);
     const next = windows.filter((w) => !w.minimized).sort((a, b) => b.el.style.zIndex - a.el.style.zIndex)[0];

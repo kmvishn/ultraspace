@@ -18,9 +18,25 @@ function mountViewer(win, args) {
     h('button', { class: 'icon-btn', title: 'Download', 'aria-label': 'Download', onclick: () => downloadFile(list[i]) }, icon('download', 16)));
   win.body.append(h('div', { class: 'app app-viewer' }, stage, prevBtn, nextBtn));
 
+  function stopMedia() {
+    const v = stage.querySelector('video');
+    if (v) {
+      try {
+        if (!v.paused) v.pause();
+        v.muted = true;
+        if (document.pictureInPictureElement === v) {
+          document.exitPictureInPicture().catch(() => {});
+        }
+        v.removeAttribute('src');
+        v.load();
+      } catch {}
+    }
+  }
+
   function show() {
     const p = list[i];
     if (!p) return;
+    stopMedia();
     const kind = kindOf({ name: baseOf(p) });
     const media = kind === 'video'
       ? h('video', { src: fileUrl(p, true), controls: true, autoplay: true, playsinline: true })
@@ -57,6 +73,8 @@ function mountViewer(win, args) {
   return {
     onArgs: setArgs,
     onFocus() { win.body.focus({ preventScroll: true }); },
+    stopMedia,
+    onDestroy: stopMedia,
     saveState: () => ({ path: list[i], siblings: list.length <= 400 ? list : [list[i]] }),
   };
 }

@@ -28,6 +28,8 @@ function mountBrowser(win, args) {
     onArgs: (a) => inner?.onArgs?.(a),
     onFocus: () => inner?.onFocus?.(),
     onResize: () => inner?.onResize?.(),
+    stopMedia: () => inner?.stopMedia?.(),
+    onClose: () => inner?.onClose?.(),
     onDestroy: () => inner?.onDestroy?.(),
     saveState: () => ({ ...(inner?.saveState?.() || args.restore || {}), mode }),
   };
@@ -319,7 +321,24 @@ function mountLocal(win, args, { swap }) {
   return {
     onArgs(a) { if (a.open) { activate(newTab(null)); submit(a.open); } },
     onFocus() { data.refresh(); },
-    onDestroy() { off(); },
+    stopMedia() {
+      for (const t of tabs) {
+        try {
+          const f = t.el.querySelector('iframe');
+          if (f) f.src = 'about:blank';
+        } catch {}
+      }
+    },
+    onDestroy() {
+      off();
+      for (const t of tabs) {
+        try {
+          const f = t.el.querySelector('iframe');
+          if (f) { f.src = 'about:blank'; f.remove(); }
+        } catch {}
+      }
+      tabs.length = 0;
+    },
     saveState: () => ({
       tabs: tabs.map((t) => ({ url: t.url || t.pending || null, title: t.title })),
       active: Math.max(0, tabs.indexOf(active)),

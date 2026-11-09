@@ -8,7 +8,7 @@ import { device } from '../session.js';
 import { pickFiles } from '../pick.js';
 
 registerApp({
-  id: 'video', name: 'Videos', icon: 'film', color: ['#fb923c', '#c2410c'], width: 960, height: 600, minWidth: 380, minHeight: 240,
+  id: 'video', name: 'Videos', icon: 'film', color: ['#fb923c', '#c2410c'], width: 960, height: 600, minWidth: 380, minHeight: 240, single: true,
   mount(win, args) { return mountVideo(win, args); },
 });
 
@@ -142,6 +142,17 @@ function mountVideo(win, args) {
   }
 
   async function load(next, list) {
+    try {
+      if (!video.paused) video.pause();
+      if (document.pictureInPictureElement === video) {
+        document.exitPictureInPicture().catch(() => {});
+      }
+      video.removeAttribute('src');
+      video.load();
+    } catch {}
+    if (item?.local) {
+      try { URL.revokeObjectURL(item.url); } catch {}
+    }
     savePosition();
     item = next;
     const path = item.path;
@@ -492,20 +503,40 @@ function mountVideo(win, args) {
     saveState: () => (!item || item.local ? {}
       : item.src ? { src: item.src, name: item.name, key: item.key, poster: item.poster, meta: item.meta }
         : { path: item.path, siblings: siblings.length <= 200 ? siblings : [item.path] }),
+    stopMedia() {
+      try {
+        if (!video.paused) video.pause();
+        if (document.pictureInPictureElement === video) {
+          document.exitPictureInPicture().catch(() => {});
+        }
+        video.removeAttribute('src');
+        video.load();
+      } catch {}
+      if (item?.local) {
+        try { URL.revokeObjectURL(item.url); } catch {}
+      }
+    },
     onDestroy() {
-      savePosition();
+      try {
+        if (!video.paused) video.pause();
+        if (document.pictureInPictureElement === video) {
+          document.exitPictureInPicture().catch(() => {});
+        }
+        video.removeAttribute('src');
+        video.load();
+      } catch {}
+      try { savePosition(); } catch {}
       clearInterval(saveTimer);
       clearTimeout(hideTimer);
-      video.pause();
-      video.removeAttribute('src');
-      video.load();
-      if (item?.local) URL.revokeObjectURL(item.url);
+      if (item?.local) {
+        try { URL.revokeObjectURL(item.url); } catch {}
+      }
       if ('mediaSession' in navigator) {
         // Media keys and lock-screen controls must not drive a closed player.
         for (const a of ['play', 'pause', 'nexttrack', 'previoustrack', 'seekbackward', 'seekforward']) {
           try { navigator.mediaSession.setActionHandler(a, null); } catch { /* unsupported action */ }
         }
-        navigator.mediaSession.metadata = null;
+        try { navigator.mediaSession.metadata = null; } catch {}
       }
     },
   };
