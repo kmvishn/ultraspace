@@ -476,8 +476,7 @@ and cgroup protection, address-family restrictions, and memory limits so Chrome 
 
 - Linux, x86-64 or arm64. Tested on **Ubuntu 24.04** with 1 GB of RAM and 2 GB of swap.
 - Go **1.26+** to build (or use a release binary).
-- For a server on the internet: nginx (or any TLS reverse proxy) and a domain for HTTPS — a free
-  [DuckDNS](https://www.duckdns.org) name and Let's Encrypt work well. On a home network neither is needed.
+- For a server on the internet: nginx (or any reverse proxy) and a domain with HTTPS (e.g. Let's Encrypt). On a home network neither is needed.
 - Optional:
   - [chrome-headless-shell](https://googlechromelabs.github.io/chrome-for-testing/) for the server browser
     (~270 MB on disk).

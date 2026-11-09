@@ -19,7 +19,7 @@ type Config struct {
 	DataDir string `toml:"data_dir"`
 	// FilesRoot is the directory the file manager is confined to.
 	FilesRoot string `toml:"files_root"`
-	// PublicOrigin is the external URL (e.g. https://example.duckdns.org), accepted in Origin checks.
+	// PublicOrigin is the external URL (e.g. https://desktop.example.com), accepted in Origin checks.
 	PublicOrigin string `toml:"public_origin"`
 	// TrustProxy trusts X-Forwarded-Proto / X-Real-IP from a loopback peer.
 	TrustProxy bool     `toml:"trust_proxy"`
