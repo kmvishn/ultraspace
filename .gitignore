@@ -1,4 +1,6 @@
 bin/
+dist/
 dev-data/
 ultraspace
 *.exe
+
