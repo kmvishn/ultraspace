@@ -8,16 +8,14 @@ export function getAudioOutputs() {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (typeof parsed.browser === 'boolean' && Array.isArray(parsed.serverSinks)) {
+        if (!parsed.browser && parsed.serverSinks.length === 0) {
+          parsed.browser = true;
+        }
         return parsed;
       }
     }
   } catch {}
 
-  // Fallback / legacy migration
-  const legacy = localStorage.getItem('us.audio_target');
-  if (legacy === 'server') {
-    return { browser: false, serverSinks: [] };
-  }
   return { browser: true, serverSinks: [] };
 }
 

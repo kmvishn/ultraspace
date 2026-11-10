@@ -9,20 +9,23 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
 
 type PlayRequest struct {
-	Path   string  `json:"path"`
-	Src    string  `json:"src"`
-	Title  string  `json:"title"`
-	Artist string  `json:"artist"`
-	Album  string  `json:"album"`
-	Seek   float64 `json:"seek"`
+	Path   string   `json:"path"`
+	Src    string   `json:"src"`
+	Title  string   `json:"title"`
+	Artist string   `json:"artist"`
+	Album  string   `json:"album"`
+	Seek   float64  `json:"seek"`
+	Sinks  []string `json:"sinks,omitempty"`
 }
 
 type SeekRequest struct {
@@ -41,14 +44,19 @@ type PlayerStatus struct {
 	Album       string  `json:"album,omitempty"`
 }
 
+// StreamResolver resolves a media source URL into a playable URL.
+type StreamResolver func(ctx context.Context, userID int64, src string) (string, error)
+
 // Player manages server-side background audio playback through mpv over IPC.
 type Player struct {
-	mu         sync.Mutex
-	log        *slog.Logger
-	filesRoot  string
-	socketPath string
-	cmd        *exec.Cmd
-	status     PlayerStatus
+	mu             sync.Mutex
+	log            *slog.Logger
+	filesRoot      string
+	socketPath     string
+	cmd            *exec.Cmd
+	status         PlayerStatus
+	streamResolver StreamResolver
+	lastPlayTime   time.Time
 }
 
 // NewPlayer creates a new server Player.
@@ -59,6 +67,13 @@ func NewPlayer(log *slog.Logger, filesRoot string) *Player {
 		filesRoot:  filesRoot,
 		socketPath: sock,
 	}
+}
+
+// SetStreamResolver assigns a resolver function for streaming providers like Navidrome.
+func (p *Player) SetStreamResolver(fn StreamResolver) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.streamResolver = fn
 }
 
 func (p *Player) ping() bool {
@@ -160,7 +175,7 @@ func (p *Player) sendCommand(cmdArgs ...any) (any, error) {
 }
 
 // Play starts playing a track on server hardware.
-func (p *Player) Play(ctx context.Context, req PlayRequest) error {
+func (p *Player) Play(ctx context.Context, req PlayRequest, userID int64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -168,20 +183,69 @@ func (p *Player) Play(ctx context.Context, req PlayRequest) error {
 		return err
 	}
 
-	target := req.Path
-	if p.filesRoot != "" && req.Path != "" {
-		clean := filepath.Clean("/" + req.Path)
-		candidate := filepath.Join(p.filesRoot, clean)
-		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
-			target = candidate
+	target := ""
+
+	// 1. Try local file path on disk
+	if req.Path != "" {
+		if st, err := os.Stat(req.Path); err == nil && !st.IsDir() {
+			target = req.Path
+		} else if p.filesRoot != "" {
+			clean := filepath.Clean("/" + req.Path)
+			candidate := filepath.Join(p.filesRoot, clean)
+			if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+				target = candidate
+			}
 		}
 	}
-	if target == "" {
-		target = req.Src
+
+	// 2. Try resolving from Src
+	if target == "" && req.Src != "" {
+		src := strings.TrimSpace(req.Src)
+		if strings.Contains(src, "navidrome") && p.streamResolver != nil {
+			resolved, err := p.streamResolver(ctx, userID, src)
+			if err == nil && resolved != "" {
+				target = resolved
+			} else {
+				p.log.Warn("resolve navidrome stream failed", "src", src, "err", err)
+			}
+		} else if strings.Contains(src, "/api/files/download") {
+			if u, err := url.Parse(src); err == nil {
+				filePath := u.Query().Get("path")
+				if filePath != "" {
+					if st, err := os.Stat(filePath); err == nil && !st.IsDir() {
+						target = filePath
+					} else if p.filesRoot != "" {
+						clean := filepath.Clean("/" + filePath)
+						candidate := filepath.Join(p.filesRoot, clean)
+						if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+							target = candidate
+						}
+					}
+				}
+			}
+		} else if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
+			target = src
+		}
+
+		// Fallback for relative or absolute paths directly on disk
+		if target == "" {
+			if st, err := os.Stat(src); err == nil && !st.IsDir() {
+				target = src
+			} else if p.filesRoot != "" {
+				clean := filepath.Clean("/" + src)
+				candidate := filepath.Join(p.filesRoot, clean)
+				if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
+					target = candidate
+				}
+			}
+		}
 	}
+
 	if target == "" {
-		return errors.New("no audio path or src provided")
+		return fmt.Errorf("cannot resolve audio source for: %s", req.Title)
 	}
+
+	p.log.Info("player starting playback", "title", req.Title)
 
 	if _, err := p.sendCommand("loadfile", target, "replace"); err != nil {
 		return fmt.Errorf("loadfile: %w", err)
@@ -192,6 +256,7 @@ func (p *Player) Play(ctx context.Context, req PlayRequest) error {
 	}
 	_, _ = p.sendCommand("set_property", "pause", false)
 
+	p.lastPlayTime = time.Now()
 	p.status = PlayerStatus{
 		Playing:     true,
 		Paused:      false,
@@ -295,6 +360,11 @@ func (p *Player) GetStatus(ctx context.Context) (*PlayerStatus, error) {
 	idleVal, err := p.sendCommand("get_property", "idle-active")
 	if err == nil {
 		if isIdle, ok := idleVal.(bool); ok && isIdle {
+			// If we initiated playback within the last 3.5 seconds, mpv may still be connecting/buffering
+			if time.Since(p.lastPlayTime) < 3500*time.Millisecond && p.status.Playing {
+				cp := p.status
+				return &cp, nil
+			}
 			p.status.Playing = false
 			p.status.Paused = false
 			cp := p.status

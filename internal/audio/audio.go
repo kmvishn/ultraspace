@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"ultraspace/internal/auth"
 	"ultraspace/internal/httpx"
 )
 
@@ -102,6 +103,13 @@ func NewWithRunner(log *slog.Logger, r Runner, filesRoot ...string) *Audio {
 		log:    log,
 		runner: r,
 		player: NewPlayer(log, root),
+	}
+}
+
+// SetStreamResolver assigns a resolver for provider stream URLs (e.g. Navidrome).
+func (a *Audio) SetStreamResolver(fn StreamResolver) {
+	if a.player != nil {
+		a.player.SetStreamResolver(fn)
 	}
 }
 
@@ -290,6 +298,21 @@ func (a *Audio) SetSinks(ctx context.Context, sinks []string) error {
 
 	if len(cleanSinks) == 0 {
 		return errors.New("at least one valid sink required")
+	}
+
+	a.mu.Lock()
+	same := len(cleanSinks) == len(a.activeSinks)
+	if same {
+		for i := range cleanSinks {
+			if cleanSinks[i] != a.activeSinks[i] {
+				same = false
+				break
+			}
+		}
+	}
+	a.mu.Unlock()
+	if same {
+		return nil
 	}
 
 	if len(cleanSinks) == 1 {
@@ -529,10 +552,21 @@ func (a *Audio) handlePlayerPlay(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	if err := a.player.Play(ctx, req); err != nil {
+	if len(req.Sinks) > 0 {
+		if err := a.SetSinks(ctx, req.Sinks); err != nil {
+			a.log.Warn("player set sinks failed", "sinks", req.Sinks, "err", err)
+		}
+	}
+
+	var userID int64
+	if u, ok := auth.UserFrom(r.Context()); ok {
+		userID = u.ID
+	}
+
+	if err := a.player.Play(ctx, req, userID); err != nil {
 		a.log.Error("player play failed", "err", err)
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return

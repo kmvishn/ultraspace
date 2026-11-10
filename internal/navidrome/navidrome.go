@@ -271,3 +271,27 @@ func randomHex(n int) string {
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
+
+// ResolveStreamURL converts an internal /api/navidrome/rest/stream?id=... URL into
+// the direct authenticated upstream Subsonic stream URL for background players like mpv.
+func (h *Handler) ResolveStreamURL(ctx context.Context, userID int64, src string) (string, error) {
+	u, err := url.Parse(src)
+	if err != nil {
+		return "", err
+	}
+	id := u.Query().Get("id")
+	if id == "" {
+		return "", errors.New("no track id in navidrome stream url")
+	}
+
+	c, ok := h.load(ctx, userID)
+	if !ok {
+		// Fallback: check if user 1 has navidrome connected
+		c, ok = h.load(ctx, 1)
+		if !ok {
+			return "", errors.New("navidrome not connected")
+		}
+	}
+
+	return c.endpoint("stream", url.Values{"id": []string{id}}), nil
+}

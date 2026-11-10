@@ -412,8 +412,15 @@ func (h *Hardware) ConnectBluetooth(ctx context.Context, mac string) error {
 	if !isValidMAC(mac) {
 		return errors.New("invalid MAC address format")
 	}
+
+	if h.isConnected(ctx, mac) {
+		return nil
+	}
+
 	_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "pairable", "on")
 	_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "trust", mac)
+	_, _ = h.runner.CombinedOutput(ctx, "pactl", "load-module", "module-bluetooth-discover")
+
 	out, err := h.runner.CombinedOutput(ctx, "bluetoothctl", "connect", mac)
 	if err == nil {
 		return nil
@@ -422,10 +429,12 @@ func (h *Hardware) ConnectBluetooth(ctx context.Context, mac string) error {
 	outStr := cleanBluetoothOutput(string(out))
 
 	// BlueZ often reports br-connection-profile-unavailable during concurrent service discovery,
-	// even though the connection actually completes in the background. Check after a short settle time.
-	time.Sleep(600 * time.Millisecond)
-	if h.isConnected(ctx, mac) {
-		return nil
+	// even though the connection actually completes in the background. Poll for up to 2.5 seconds.
+	for i := 0; i < 7; i++ {
+		time.Sleep(350 * time.Millisecond)
+		if h.isConnected(ctx, mac) {
+			return nil
+		}
 	}
 
 	if strings.Contains(outStr, "br-connection-profile-unavailable") || strings.Contains(outStr, "Protocol not available") {
@@ -436,19 +445,18 @@ func (h *Hardware) ConnectBluetooth(ctx context.Context, mac string) error {
 		} else {
 			// If already paired, cycling disconnect clears stale BlueZ AVDTP transport channels
 			_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "disconnect", mac)
-			time.Sleep(600 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 		}
-
-		// Ensure PulseAudio's bluetooth discovery module is active
-		_, _ = h.runner.CombinedOutput(ctx, "pactl", "load-module", "module-bluetooth-discover")
 
 		connOut, connErr := h.runner.CombinedOutput(ctx, "bluetoothctl", "connect", mac)
 		if connErr == nil {
 			return nil
 		}
-		time.Sleep(600 * time.Millisecond)
-		if h.isConnected(ctx, mac) {
-			return nil
+		for i := 0; i < 7; i++ {
+			time.Sleep(350 * time.Millisecond)
+			if h.isConnected(ctx, mac) {
+				return nil
+			}
 		}
 		retryStr := cleanBluetoothOutput(string(connOut))
 		if retryStr != "" {

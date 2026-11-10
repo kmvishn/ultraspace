@@ -543,6 +543,10 @@ function mountMusic(win, args) {
     }
   }
 
+  let isAdvancing = false;
+  let serverHasStarted = false;
+  let serverPlayAttemptTime = 0;
+
   async function syncPlaybackOutputs(outputs) {
     updateTargetBtnUI();
     const t = queue[index];
@@ -551,7 +555,7 @@ function mountMusic(win, args) {
     const hasServer = outputs.serverSinks && outputs.serverSinks.length > 0;
     const hasBrowser = !!outputs.browser;
 
-    let curTime = audio.currentTime || 0;
+    let curTime = hasBrowser ? (audio.currentTime || 0) : ((seek.value / 1000) * (queue[index]?.duration || 1));
     let isPlaying = (hasBrowser && !audio.paused) || (serverPlaying && !serverPaused);
 
     // Sync Server
@@ -559,6 +563,11 @@ function mountMusic(win, args) {
       if (isPlaying) {
         if (!serverPlaying || serverPaused) {
           try {
+            serverPlayAttemptTime = Date.now();
+            serverHasStarted = false;
+            serverPlaying = true;
+            serverPaused = false;
+            startServerPoll();
             await api('POST', '/api/audio/player/play', {
               path: t.path || '',
               src: t.src || '',
@@ -566,11 +575,12 @@ function mountMusic(win, args) {
               artist: t.artist || '',
               album: t.album || '',
               seek: curTime,
+              sinks: outputs.serverSinks,
             });
-            serverPlaying = true;
-            serverPaused = false;
-            startServerPoll();
           } catch (err) {
+            serverPlaying = false;
+            serverPaused = false;
+            stopServerPoll();
             report(err);
           }
         }
@@ -581,6 +591,7 @@ function mountMusic(win, args) {
         api('POST', '/api/audio/player/stop').catch(() => {});
         serverPlaying = false;
         serverPaused = false;
+        serverHasStarted = false;
       }
     }
 
@@ -592,10 +603,13 @@ function mountMusic(win, args) {
       }
       if (isPlaying && audio.paused) {
         audio.currentTime = curTime;
-        audio.play().catch(report);
+        audio.play().catch((err) => {
+          if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') report(err);
+        });
       }
     } else {
       if (!audio.paused) audio.pause();
+      audio.removeAttribute('src');
     }
 
     broadcast();
@@ -620,19 +634,39 @@ function mountMusic(win, args) {
           seek.style.setProperty('--fill', `${(100 * st.current_time) / d}%`);
           tCur.textContent = fmtClock(st.current_time);
 
+          // Navidrome scrobble when playing on server
+          const t = queue[index];
+          if (t?.nd && !scrobbled && st.current_time >= Math.min(240, d / 2)) {
+            scrobbled = true;
+            nd.call('scrobble', { id: t.id, submission: true }).catch(() => {});
+          }
+
           // If browser is also playing concurrently, keep them tightly synced if drift exceeds 1.5s
           if (outputs.browser && !audio.paused && Math.abs(audio.currentTime - st.current_time) > 1.5) {
             audio.currentTime = st.current_time;
           }
         }
         if (st.playing) {
+          serverHasStarted = true;
           serverPaused = st.paused;
           playBtn.replaceChildren(icon(st.paused ? 'play' : 'pause', 20));
           playBtn.setAttribute('aria-label', st.paused ? 'Play' : 'Pause');
           markPlaying();
-        } else if (serverPlaying && !serverPaused) {
+        } else if (serverHasStarted && serverPlaying && !serverPaused) {
+          if (!isAdvancing) {
+            isAdvancing = true;
+            serverPlaying = false;
+            serverHasStarted = false;
+            next(false);
+            setTimeout(() => { isAdvancing = false; }, 1000);
+          }
+        } else if (!serverHasStarted && (Date.now() - serverPlayAttemptTime > 7000)) {
           serverPlaying = false;
-          next(false);
+          stopServerPoll();
+          markPlaying();
+          playBtn.replaceChildren(icon('play', 20));
+          playBtn.setAttribute('aria-label', 'Play');
+          toast(`Server could not play: ${queue[index]?.title || 'track'}`);
         }
       } catch {}
     }, 750);
@@ -675,6 +709,11 @@ function mountMusic(win, args) {
     if (hasServer) {
       if (autoplay) {
         try {
+          serverPlayAttemptTime = Date.now();
+          serverHasStarted = false;
+          serverPlaying = true;
+          serverPaused = false;
+          startServerPoll();
           await api('POST', '/api/audio/player/play', {
             path: t.path || '',
             src: t.src || '',
@@ -682,11 +721,12 @@ function mountMusic(win, args) {
             artist: t.artist || '',
             album: t.album || '',
             seek: startPos,
+            sinks: outputs.serverSinks,
           });
-          serverPlaying = true;
-          serverPaused = false;
-          startServerPoll();
         } catch (err) {
+          serverPlaying = false;
+          serverPaused = false;
+          stopServerPoll();
           report(err);
         }
       } else {
@@ -699,6 +739,7 @@ function mountMusic(win, args) {
         api('POST', '/api/audio/player/stop').catch(() => {});
         serverPlaying = false;
         serverPaused = false;
+        serverHasStarted = false;
       }
     }
 
@@ -707,7 +748,9 @@ function mountMusic(win, args) {
       if (startPos > 0) audio.currentTime = startPos;
       if (autoplay) {
         audio.play().catch((err) => {
-          if (err.name !== 'NotAllowedError') report(new Error(`Cannot play ${t.title}: ${err.message}`));
+          if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') {
+            report(new Error(`Cannot play ${t.title}: ${err.message}`));
+          }
         });
       }
     } else {
@@ -782,26 +825,38 @@ function mountMusic(win, args) {
         } else {
           const t = queue[index];
           if (t) {
+            serverPlayAttemptTime = Date.now();
+            serverHasStarted = false;
+            serverPlaying = true;
+            serverPaused = false;
+            startServerPoll();
             await api('POST', '/api/audio/player/play', {
               path: t.path || '',
               src: t.src || '',
               title: t.title || '',
               artist: t.artist || '',
               album: t.album || '',
-              seek: audio.currentTime || 0,
-            }).catch(report);
-            serverPlaying = true;
-            serverPaused = false;
-            startServerPoll();
+              seek: hasBrowser ? (audio.currentTime || 0) : ((seek.value / 1000) * (queue[index]?.duration || 1)),
+              sinks: outputs.serverSinks,
+            }).catch((err) => {
+              serverPlaying = false;
+              serverPaused = false;
+              stopServerPoll();
+              report(err);
+            });
           }
         }
       }
       if (hasBrowser) {
         if (audio.src) {
-          audio.play().catch(report);
+          audio.play().catch((err) => {
+            if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') report(err);
+          });
         } else if (queue[index]) {
           audio.src = queue[index].src;
-          audio.play().catch(report);
+          audio.play().catch((err) => {
+            if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') report(err);
+          });
         }
       }
       playBtn.replaceChildren(icon('pause', 20));
@@ -833,7 +888,7 @@ function mountMusic(win, args) {
       }
       if (hasBrowser) {
         audio.currentTime = 0;
-        audio.play();
+        audio.play().catch(() => {});
       }
       return;
     }
@@ -987,8 +1042,8 @@ function mountMusic(win, args) {
   });
   win.body.tabIndex = -1;
   if ('mediaSession' in navigator) {
-    navigator.mediaSession.setActionHandler('play', () => audio.play());
-    navigator.mediaSession.setActionHandler('pause', () => audio.pause());
+    navigator.mediaSession.setActionHandler('play', () => toggle());
+    navigator.mediaSession.setActionHandler('pause', () => toggle());
     navigator.mediaSession.setActionHandler('nexttrack', () => next(true));
     navigator.mediaSession.setActionHandler('previoustrack', () => prev());
   }
