@@ -88,6 +88,30 @@ function mountSettings(win, args) {
     let timer = null;
     let isUpdating = false;
 
+    let currentTarget = localStorage.getItem('us.audio_target') || 'browser';
+    const btnBrowser = h('button', {
+      class: `seg-btn text ${currentTarget === 'browser' ? 'active' : ''}`,
+      style: { flex: '1', padding: '10px' },
+      onclick: () => setTarget('browser'),
+    }, icon('laptop', 16), ' This Device (Browser)');
+
+    const btnServer = h('button', {
+      class: `seg-btn text ${currentTarget === 'server' ? 'active' : ''}`,
+      style: { flex: '1', padding: '10px' },
+      onclick: () => setTarget('server'),
+    }, icon('volume2', 16), ' Server Audio Hardware');
+
+    const targetSeg = h('div', { class: 'seg big', style: { width: '100%', marginBottom: '12px' } }, btnBrowser, btnServer);
+
+    function setTarget(t) {
+      currentTarget = t;
+      localStorage.setItem('us.audio_target', t);
+      btnBrowser.classList.toggle('active', t === 'browser');
+      btnServer.classList.toggle('active', t === 'server');
+      emit('audio-target-changed', { target: t });
+      toast(t === 'server' ? 'Audio playback destination set to server hardware' : 'Audio playback destination set to this browser');
+    }
+
     async function loadStatus() {
       if (isUpdating) return;
       try {
@@ -154,6 +178,7 @@ function mountSettings(win, args) {
     async function selectSink(s) {
       try {
         await api('POST', '/api/audio/sink', { sink: s.name });
+        setTarget('server');
         toast(`Audio output switched to ${s.description || s.name}`);
         await loadStatus();
       } catch (err) {
@@ -210,8 +235,9 @@ function mountSettings(win, args) {
       h('div', { class: 'hero-actions' }, muteBtn, testBtn));
 
     el.replaceChildren(h('div', { class: 'settings-page' },
-      group('Master Volume & Controls', 'Controls physical output volume on the server.', volRow),
-      group('Audio Output Devices', 'Choose which physical speaker, headphone jack, HDMI, or Bluetooth sink to output sound through.', sinkList)));
+      group('Audio Playback Destination', 'Choose whether Ultraspace routes media audio to this client browser or through the server hardware.', targetSeg),
+      group('Server Master Volume & Controls', 'Controls physical output volume on the server host.', volRow),
+      group('Server Audio Output Devices', 'Choose which physical speaker, headphone jack, HDMI, or Bluetooth sink on the server to output sound through.', sinkList)));
 
     loadStatus();
     timer = setInterval(loadStatus, 15_000);

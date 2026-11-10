@@ -320,5 +320,60 @@ func TestAudioHTTPHandlers(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("POST /api/audio/test code = %d", w.Code)
 	}
+
+	// 6. GET /api/audio/player/status
+	req = httptest.NewRequest("GET", "/api/audio/player/status", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/audio/player/status code = %d", w.Code)
+	}
+
+	// 7. POST /api/audio/player/stop
+	req = httptest.NewRequest("POST", "/api/audio/player/stop", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/audio/player/stop code = %d", w.Code)
+	}
+}
+
+func TestSinkInputMigration(t *testing.T) {
+	var movedInputID, movedSink string
+	var mu sync.Mutex
+
+	runner := &mockRunner{
+		handlers: map[string]func(args []string) ([]byte, error){
+			"set-default-sink": func(args []string) ([]byte, error) {
+				return []byte(""), nil
+			},
+			"sink-inputs short": func(args []string) ([]byte, error) {
+				return []byte("15\t1\t242\tprotocol-native.c\ts16le 1ch 48000Hz\n"), nil
+			},
+			"move-sink-input": func(args []string) ([]byte, error) {
+				mu.Lock()
+				if len(args) >= 3 {
+					movedInputID = args[len(args)-2]
+					movedSink = args[len(args)-1]
+				}
+				mu.Unlock()
+				return []byte(""), nil
+			},
+		},
+	}
+
+	audioSvc := NewWithRunner(slog.Default(), runner)
+	if err := audioSvc.SetDefaultSink(context.Background(), "bluez_sink.test"); err != nil {
+		t.Fatalf("SetDefaultSink err: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if movedInputID != "15" {
+		t.Errorf("movedInputID = %q, want 15", movedInputID)
+	}
+	if movedSink != "bluez_sink.test" {
+		t.Errorf("movedSink = %q, want bluez_sink.test", movedSink)
+	}
 }
 

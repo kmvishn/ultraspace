@@ -90,7 +90,9 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 	if err := sh.Start(ctx); err != nil {
 		log.Warn("sinkhole start", "err", err)
 	}
+	aud := audio.New(log, cfg.FilesRoot)
 	cleanup := func() {
+		aud.Close()
 		sh.Stop()
 		rb.Shutdown()
 		dl.Close()
@@ -129,7 +131,7 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 	mon.Register(mux, a.Require)
 	services.New(log).Register(mux, a.Require)
 	net.Register(mux, a.Require)
-	audio.New(log).Register(mux, a.Require)
+	aud.Register(mux, a.Require)
 	power.New(log).Register(mux, a.Require)
 	hardware.New(log).Register(mux, a.Require)
 	sh.Register(mux, a.Require)

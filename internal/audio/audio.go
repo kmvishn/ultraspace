@@ -63,20 +63,44 @@ type SetMuteRequest struct {
 	Sink string `json:"sink"` // optional; defaults to active sink
 }
 
-// Audio manages PulseAudio/PipeWire interactions.
+// Audio manages PulseAudio/PipeWire interactions and server playback.
 type Audio struct {
 	log    *slog.Logger
 	runner Runner
+	player *Player
 }
 
-// New creates an Audio service with execRunner.
-func New(log *slog.Logger) *Audio {
-	return &Audio{log: log, runner: execRunner{}}
+// New creates an Audio service with execRunner and server Player.
+func New(log *slog.Logger, filesRoot ...string) *Audio {
+	root := ""
+	if len(filesRoot) > 0 {
+		root = filesRoot[0]
+	}
+	return &Audio{
+		log:    log,
+		runner: execRunner{},
+		player: NewPlayer(log, root),
+	}
 }
 
 // NewWithRunner creates an Audio service with custom Runner for testing.
-func NewWithRunner(log *slog.Logger, r Runner) *Audio {
-	return &Audio{log: log, runner: r}
+func NewWithRunner(log *slog.Logger, r Runner, filesRoot ...string) *Audio {
+	root := ""
+	if len(filesRoot) > 0 {
+		root = filesRoot[0]
+	}
+	return &Audio{
+		log:    log,
+		runner: r,
+		player: NewPlayer(log, root),
+	}
+}
+
+// Close releases server player resources.
+func (a *Audio) Close() {
+	if a.player != nil {
+		a.player.Close()
+	}
 }
 
 // Register wires HTTP endpoints into the router.
@@ -86,6 +110,14 @@ func (a *Audio) Register(mux *http.ServeMux, auth func(http.Handler) http.Handle
 	mux.Handle("POST /api/audio/volume", auth(http.HandlerFunc(a.handleSetVolume)))
 	mux.Handle("POST /api/audio/mute", auth(http.HandlerFunc(a.handleSetMute)))
 	mux.Handle("POST /api/audio/test", auth(http.HandlerFunc(a.handlePlayTestSound)))
+
+	// Server-side audio player endpoints
+	mux.Handle("POST /api/audio/player/play", auth(http.HandlerFunc(a.handlePlayerPlay)))
+	mux.Handle("POST /api/audio/player/pause", auth(http.HandlerFunc(a.handlePlayerPause)))
+	mux.Handle("POST /api/audio/player/resume", auth(http.HandlerFunc(a.handlePlayerResume)))
+	mux.Handle("POST /api/audio/player/seek", auth(http.HandlerFunc(a.handlePlayerSeek)))
+	mux.Handle("POST /api/audio/player/stop", auth(http.HandlerFunc(a.handlePlayerStop)))
+	mux.Handle("GET /api/audio/player/status", auth(http.HandlerFunc(a.handlePlayerStatus)))
 }
 
 var volRegexp = regexp.MustCompile(`/ +([0-9]+)%`)
@@ -215,7 +247,7 @@ func (a *Audio) GetStatus(ctx context.Context) (*Status, error) {
 	}, nil
 }
 
-// SetDefaultSink changes the system-wide default audio output sink.
+// SetDefaultSink changes the system-wide default audio output sink and immediately moves all active streams.
 func (a *Audio) SetDefaultSink(ctx context.Context, sinkName string) error {
 	sinkName = strings.TrimSpace(sinkName)
 	if sinkName == "" {
@@ -228,6 +260,25 @@ func (a *Audio) SetDefaultSink(ctx context.Context, sinkName string) error {
 	if err != nil {
 		return fmt.Errorf("set-default-sink: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
+
+	// Move all currently active sink inputs to the new sink so ongoing audio switches immediately.
+	inputsOut, err := a.runner.CombinedOutput(ctx, "pactl", "list", "sink-inputs", "short")
+	if err == nil {
+		scanner := bufio.NewScanner(bytes.NewReader(inputsOut))
+		for scanner.Scan() {
+			fields := strings.Fields(scanner.Text())
+			if len(fields) > 0 {
+				inputID := fields[0]
+				if _, err := strconv.Atoi(inputID); err == nil {
+					_, moveErr := a.runner.CombinedOutput(ctx, "pactl", "move-sink-input", inputID, sinkName)
+					if moveErr != nil {
+						a.log.Debug("move-sink-input failed", "id", inputID, "sink", sinkName, "err", moveErr)
+					}
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -377,4 +428,86 @@ func (a *Audio) handlePlayTestSound(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "playing"})
 }
+
+func (a *Audio) handlePlayerPlay(w http.ResponseWriter, r *http.Request) {
+	var req PlayRequest
+	if !httpx.DecodeJSON(w, r, &req) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if err := a.player.Play(ctx, req); err != nil {
+		a.log.Error("player play failed", "err", err)
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "playing"})
+}
+
+func (a *Audio) handlePlayerPause(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if err := a.player.Pause(ctx); err != nil {
+		a.log.Error("player pause failed", "err", err)
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "paused"})
+}
+
+func (a *Audio) handlePlayerResume(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if err := a.player.Resume(ctx); err != nil {
+		a.log.Error("player resume failed", "err", err)
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "playing"})
+}
+
+func (a *Audio) handlePlayerSeek(w http.ResponseWriter, r *http.Request) {
+	var req SeekRequest
+	if !httpx.DecodeJSON(w, r, &req) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if err := a.player.Seek(ctx, req.Time); err != nil {
+		a.log.Error("player seek failed", "err", err)
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok", "time": req.Time})
+}
+
+func (a *Audio) handlePlayerStop(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if err := a.player.Stop(ctx); err != nil {
+		a.log.Error("player stop failed", "err", err)
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
+}
+
+func (a *Audio) handlePlayerStatus(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
+	st, err := a.player.GetStatus(ctx)
+	if err != nil {
+		a.log.Error("player status failed", "err", err)
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, st)
+}
+
 
