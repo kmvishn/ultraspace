@@ -99,6 +99,45 @@ func TestGetStatusWithBattery(t *testing.T) {
 	}
 }
 
+func TestGetStatusPMICBattery(t *testing.T) {
+	fs := &mockFS{
+		files: map[string][]byte{
+			"/sys/class/power_supply/axp288_charger/type":     []byte("USB\n"),
+			"/sys/class/power_supply/axp288_charger/online":   []byte("1\n"),
+			"/sys/class/power_supply/axp288_fuel_gauge/type":  []byte("Battery\n"),
+			"/sys/class/power_supply/axp288_fuel_gauge/capacity": []byte("42\n"),
+			"/sys/class/power_supply/axp288_fuel_gauge/status":   []byte("Discharging\n"),
+			"/sys/class/power_supply/axp288_fuel_gauge/health":   []byte("Good\n"),
+			"/sys/class/thermal/thermal_zone0/temp":           []byte("56000\n"),
+		},
+	}
+
+	p := NewWithFS(slog.Default(), fs, "/sys/class")
+	st, err := p.GetStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetStatus err: %v", err)
+	}
+
+	if !st.HasBattery {
+		t.Fatal("expected HasBattery to be true for PMIC fuel gauge")
+	}
+	if st.Percent != 42 {
+		t.Errorf("Percent = %d, want 42", st.Percent)
+	}
+	if st.Status != "Discharging" {
+		t.Errorf("Status = %q, want Discharging", st.Status)
+	}
+	if !st.ACOnline {
+		t.Error("expected ACOnline to be true")
+	}
+	if st.Health != "Good" {
+		t.Errorf("Health = %q, want Good", st.Health)
+	}
+	if st.TemperatureC != 56.0 {
+		t.Errorf("TemperatureC = %f, want 56.0", st.TemperatureC)
+	}
+}
+
 func TestGetStatusDischarging(t *testing.T) {
 	fs := &mockFS{
 		files: map[string][]byte{

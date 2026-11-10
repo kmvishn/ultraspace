@@ -105,8 +105,12 @@ func (p *Power) GetStatus(ctx context.Context) (*Status, error) {
 			name := e.Name()
 			entryPath := filepath.Join(powerDir, name)
 
-			// AC adapter check
-			if strings.HasPrefix(name, "AC") || strings.HasPrefix(name, "ADP") || strings.HasPrefix(name, "Mains") {
+			// Read power supply type from sysfs (e.g. Battery, Mains, USB)
+			psType := strings.TrimSpace(p.readString(filepath.Join(entryPath, "type")))
+
+			// AC / Charger check
+			if psType == "Mains" || psType == "USB" || psType == "Wireless" ||
+				strings.HasPrefix(name, "AC") || strings.HasPrefix(name, "ADP") || strings.HasPrefix(name, "Mains") {
 				online, err := p.readInt(filepath.Join(entryPath, "online"))
 				if err == nil {
 					status.ACOnline = (online == 1)
@@ -114,7 +118,7 @@ func (p *Power) GetStatus(ctx context.Context) (*Status, error) {
 			}
 
 			// Battery check
-			if strings.HasPrefix(name, "BAT") || strings.HasPrefix(name, "battery") {
+			if psType == "Battery" || strings.HasPrefix(name, "BAT") || strings.HasPrefix(name, "battery") {
 				capVal, err := p.readInt(filepath.Join(entryPath, "capacity"))
 				if err == nil {
 					status.HasBattery = true

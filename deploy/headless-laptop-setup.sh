@@ -68,8 +68,8 @@ echo "  -> Polkit rule configured."
 echo ""
 echo "[4/6] Configuring Bluetooth & Audio groups for Ultraspace..."
 if id ultraspace >/dev/null 2>&1; then
-    usermod -aG bluetooth,audio,netdev,pulse-access ultraspace || true
-    echo "  -> Added ultraspace to bluetooth, audio, netdev, pulse-access groups."
+    usermod -aG bluetooth,audio,netdev,pulse-access,systemd-journal,adm ultraspace || true
+    echo "  -> Added ultraspace to bluetooth, audio, netdev, pulse-access, systemd-journal, adm groups."
 fi
 
 echo ""

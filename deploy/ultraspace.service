@@ -24,7 +24,8 @@ UMask=0027
 
 # Hardening: the service can write only to /var/lib/ultraspace.
 NoNewPrivileges=yes
-CapabilityBoundingSet=
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
