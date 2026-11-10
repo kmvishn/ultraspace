@@ -198,12 +198,15 @@ install_dependencies() {
   deps="ffmpeg mpv pulseaudio pulseaudio-utils pulseaudio-module-bluetooth bluez network-manager pciutils usbutils curl ca-certificates"
   apt_install $deps || warn "some packages could not be installed; you may need to install them manually"
 
-  # Polkit rule for unprivileged NetworkManager control (Wi-Fi scan, connect, hotspot)
+  # Polkit rule for unprivileged NetworkManager and System Power/Reboot control
   if [ -d /etc/polkit-1/rules.d ]; then
     cat << 'EOF' > /etc/polkit-1/rules.d/50-ultraspace-network.rules
-// Allow ultraspace service to manage network and wifi without prompting for root
+// Allow ultraspace service to manage network, power, reboot, and service restart without prompting for root
 polkit.addRule(function(action, subject) {
-    if (action.id.indexOf("org.freedesktop.NetworkManager.") == 0 &&
+    if ((action.id.indexOf("org.freedesktop.NetworkManager.") == 0 ||
+         action.id.indexOf("org.freedesktop.login1.power-off") == 0 ||
+         action.id.indexOf("org.freedesktop.login1.reboot") == 0 ||
+         action.id == "org.freedesktop.systemd1.manage-units") &&
         (subject.user == "ultraspace" || subject.isInGroup("sudo") || subject.isInGroup("wheel"))) {
         return polkit.Result.YES;
     }

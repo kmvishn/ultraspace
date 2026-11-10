@@ -10,6 +10,7 @@ import { startChatbot, stopChatbot } from './chatbot.js';
 import { webTarget } from './apps/browser.js';
 import { initLockScreen, lockDesktop } from './lockscreen.js';
 import { openAudioOutputsPopover } from './audio-target.js';
+import { getPowerStatus, promptReboot, promptShutdown, promptRestartService } from './power.js';
 
 export const WALLPAPERS = [
   { id: 'aurora', name: 'Aurora' },
@@ -135,15 +136,26 @@ function menuBar(user, onSignOut) {
 
   const logo = h('button', {
     class: 'mb-item mb-logo', 'aria-label': 'ultraspace menu',
-    onclick: (e) => {
+    onclick: async (e) => {
       const r = e.currentTarget.getBoundingClientRect();
-      menu(r.left, r.bottom + 6, [
+      const p = await getPowerStatus();
+      const canShutdown = p?.capabilities?.can_shutdown ?? false;
+
+      const items = [
         { label: 'About ultraspace', icon: 'info', action: () => openApp('settings', { section: 'about' }) },
         { label: 'Settings', icon: 'sliders', action: () => openApp('settings') },
         '-',
         { label: 'Lock screen', icon: 'lock', hint: 'Ctrl Alt L', action: lockDesktop },
         { label: `Sign out ${user.username}`, icon: 'logOut', action: onSignOut },
-      ]);
+        '-',
+        { label: 'Restart Server…', icon: 'refresh', action: promptReboot },
+      ];
+
+      if (canShutdown) {
+        items.push({ label: 'Shut Down…', icon: 'power', danger: true, action: promptShutdown });
+      }
+
+      menu(r.left, r.bottom + 6, items);
     },
   }, h('span', { class: 'logo-mark' }));
 
@@ -395,14 +407,36 @@ export function openLauncher() {
   };
 
   const systemItems = (q) => {
+    const res = [];
     if (!q || 'lock screen'.includes(q)) {
-      return [{
+      res.push({
         group: 'System', title: 'Lock screen', sub: 'Lock screen immediately (Ctrl Alt L)',
         tile: h('span', { class: 'li-tile', style: { background: 'linear-gradient(145deg, #64748b, #334155)' } }, icon('lock', 16)),
         run: lockDesktop,
-      }];
+      });
     }
-    return [];
+    if (q && ('restart server'.includes(q) || 'reboot'.includes(q) || 'restart'.includes(q))) {
+      res.push({
+        group: 'System', title: 'Restart Server', sub: 'Reboot host system',
+        tile: h('span', { class: 'li-tile', style: { background: 'linear-gradient(145deg, #f59e0b, #d97706)' } }, icon('refresh', 16)),
+        run: promptReboot,
+      });
+    }
+    if (q && ('shutdown'.includes(q) || 'shut down'.includes(q) || 'power off'.includes(q))) {
+      res.push({
+        group: 'System', title: 'Shut Down System', sub: 'Power off machine completely',
+        tile: h('span', { class: 'li-tile', style: { background: 'linear-gradient(145deg, #ef4444, #b91c1c)' } }, icon('power', 16)),
+        run: promptShutdown,
+      });
+    }
+    if (q && ('restart service'.includes(q) || 'restart ultraspace'.includes(q))) {
+      res.push({
+        group: 'System', title: 'Restart Ultraspace Service', sub: 'Restart daemon process',
+        tile: h('span', { class: 'li-tile', style: { background: 'linear-gradient(145deg, #7c6cf2, #5b46e8)' } }, icon('refresh', 16)),
+        run: promptRestartService,
+      });
+    }
+    return res;
   };
 
   const searchFiles = debounce(async (q, mySeq) => {

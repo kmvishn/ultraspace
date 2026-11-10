@@ -3,6 +3,7 @@ package power
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -211,5 +212,97 @@ func TestPowerHTTPHandler(t *testing.T) {
 	}
 	if !st.HasBattery || st.Percent != 95 || st.Status != "Full" {
 		t.Errorf("unexpected status: %+v", st)
+	}
+}
+
+type mockRunner struct {
+	commands []string
+	virtOut  string
+}
+
+func (m *mockRunner) CombinedOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
+	cmdStr := name + " " + strings.Join(args, " ")
+	m.commands = append(m.commands, cmdStr)
+	if name == "systemd-detect-virt" {
+		if m.virtOut == "" || m.virtOut == "none" {
+			return []byte("none\n"), errors.New("exit status 1")
+		}
+		return []byte(m.virtOut + "\n"), nil
+	}
+	return []byte("ok"), nil
+}
+
+func TestCapabilities(t *testing.T) {
+	runner := &mockRunner{virtOut: "kvm"}
+	p := NewWithFSAndRunner(slog.Default(), &mockFS{files: map[string][]byte{}}, runner, "/sys/class")
+
+	// 1. VPS with no battery: can reboot, but cannot shutdown
+	caps := p.GetCapabilities(context.Background(), false)
+	if caps.Environment != "vps" {
+		t.Errorf("expected Environment = vps, got %s", caps.Environment)
+	}
+	if !caps.CanReboot {
+		t.Error("expected CanReboot = true on VPS")
+	}
+	if caps.CanShutdown {
+		t.Error("expected CanShutdown = false on VPS")
+	}
+
+	// 2. Laptop (has battery): can both reboot and shutdown
+	capsLaptop := p.GetCapabilities(context.Background(), true)
+	if capsLaptop.Environment != "laptop" {
+		t.Errorf("expected Environment = laptop, got %s", capsLaptop.Environment)
+	}
+	if !capsLaptop.CanReboot || !capsLaptop.CanShutdown {
+		t.Error("expected CanReboot and CanShutdown to be true on laptop")
+	}
+
+	// 3. Physical server (no virt, no battery): can both reboot and shutdown
+	runner.virtOut = "none"
+	capsPhysical := p.GetCapabilities(context.Background(), false)
+	if capsPhysical.Environment != "physical" {
+		t.Errorf("expected Environment = physical, got %s", capsPhysical.Environment)
+	}
+	if !capsPhysical.CanReboot || !capsPhysical.CanShutdown {
+		t.Error("expected CanReboot and CanShutdown to be true on physical machine")
+	}
+}
+
+func TestPowerActionEndpoints(t *testing.T) {
+	runner := &mockRunner{virtOut: "none"}
+	fs := &mockFS{files: map[string][]byte{}}
+	p := NewWithFSAndRunner(slog.Default(), fs, runner, "/sys/class")
+
+	mux := http.NewServeMux()
+	passAuth := func(h http.Handler) http.Handler { return h }
+	p.Register(mux, passAuth)
+
+	// 1. Reboot
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/api/power/reboot", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reboot code = %d, want 200", rec.Code)
+	}
+
+	// 2. Shutdown (Physical allowed)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/api/power/shutdown", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("shutdown code = %d, want 200", rec.Code)
+	}
+
+	// 3. Restart Service
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/api/power/restart-service", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("restart-service code = %d, want 200", rec.Code)
+	}
+
+	// 4. Shutdown on VPS rejected with 403
+	runner.virtOut = "kvm"
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/api/power/shutdown", nil))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("vps shutdown code = %d, want 403", rec.Code)
 	}
 }

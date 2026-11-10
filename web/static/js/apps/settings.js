@@ -5,6 +5,7 @@ import { patternPad } from '../pattern.js';
 import { chatbotConfigChanged } from '../chatbot.js';
 import { registerApp, openApp } from '../wm.js';
 import { WALLPAPERS, ACCENTS, lockDesktop } from '../desktop.js';
+import { getPowerStatus, promptReboot, promptShutdown, promptRestartService } from '../power.js';
 
 registerApp({
   id: 'settings', name: 'Settings', icon: 'sliders', color: ['#94a3b8', '#475569'], width: 820, height: 600,
@@ -1318,6 +1319,58 @@ function mountSettings(win, args) {
 
   function about(el) {
     const kv = h('dl', { class: 'kv' });
+    const powerBox = h('div', { class: 'device-list', style: { display: 'flex', flexDirection: 'column', gap: '8px' } }, h('div', { class: 'empty-state small' }, 'Checking host power capabilities…'));
+
+    const renderPower = async () => {
+      const p = await getPowerStatus(true);
+      const canShutdown = p?.capabilities?.can_shutdown ?? false;
+      const env = p?.capabilities?.environment || 'physical';
+      const envLabel = env === 'laptop' ? 'Laptop (Physical Hardware)' : env === 'physical' ? 'Local Server (Physical Hardware)' : 'VPS / Cloud Server (Virtualized)';
+      const envPill = env === 'vps' ? 'VPS' : env === 'laptop' ? 'Laptop' : 'Physical';
+
+      const actions = [];
+
+      // Reboot button
+      actions.push(h('button', {
+        class: 'btn', onclick: promptReboot,
+      }, icon('refresh', 15), 'Restart Server…'));
+
+      // Shutdown button (only for laptop and physical local server)
+      if (canShutdown) {
+        actions.push(h('button', {
+          class: 'btn danger', onclick: promptShutdown,
+        }, icon('power', 15), 'Shut Down System…'));
+      }
+
+      // Restart service button
+      actions.push(h('button', {
+        class: 'btn', onclick: promptRestartService,
+      }, icon('refresh', 15), 'Restart Ultraspace Service'));
+
+      const card = h('div', { class: 'device current', style: { display: 'flex', flexDirection: 'column', gap: '14px', padding: '16px' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },
+            h('span', { class: 'device-icon' }, icon(env === 'laptop' ? 'laptop' : 'server', 22)),
+            h('div', { class: 'device-text' },
+              h('div', { class: 'device-name' }, envLabel, h('span', { class: 'pill active', style: { marginLeft: '6px' } }, envPill)),
+              h('div', { class: 'set-desc' },
+                canShutdown
+                  ? 'Physical machine detected. Shutdown and reboot are both enabled.'
+                  : 'VPS / cloud virtual machine detected. Host shutdown is disabled to prevent remote lockout; reboot is available.'
+              )
+            )
+          )
+        ),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', paddingTop: '10px', borderTop: '1px solid var(--border)' } },
+          ...actions
+        )
+      );
+
+      powerBox.replaceChildren(card);
+    };
+
+    renderPower();
+
     const render = (s) => {
       if (!s) return;
       kv.replaceChildren(...[
@@ -1335,6 +1388,7 @@ function mountSettings(win, args) {
     el.replaceChildren(h('div', { class: 'settings-page' },
       h('div', { class: 'about-hero' }, h('span', { class: 'logo-mark big' }),
         h('div', null, h('div', { class: 'about-name' }, 'ultraspace'), h('div', { class: 'set-desc' }, 'Your personal server, in one small Go binary.'))),
+      group('Server & Power Controls', 'Manage host system power, reboot, or restart the Ultraspace daemon.', powerBox),
       group('This server', null, kv)));
     return on('system', render);
   }
