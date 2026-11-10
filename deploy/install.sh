@@ -236,11 +236,13 @@ EOF
 EOF
   fi
 
-  # Enable Bluetooth audio modules in /etc/pulse/system.pa if present
+  # Enable Bluetooth audio modules and configure stream routing in /etc/pulse/system.pa
   if [ -f /etc/pulse/system.pa ]; then
     if ! grep -q "module-bluetooth-discover" /etc/pulse/system.pa; then
       printf '\n### Ultraspace Bluetooth & Audio Modules\nload-module module-bluetooth-policy\nload-module module-bluetooth-discover\n' >> /etc/pulse/system.pa
     fi
+    # Ensure module-stream-restore does not forcefully pin streams to old sinks
+    sed -i 's/load-module module-stream-restore$/load-module module-stream-restore restore_device=no/' /etc/pulse/system.pa
   fi
 
   # System-wide PulseAudio service for headless server operation

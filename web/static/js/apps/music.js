@@ -558,42 +558,7 @@ function mountMusic(win, args) {
     let curTime = hasBrowser ? (audio.currentTime || 0) : ((seek.value / 1000) * (queue[index]?.duration || 1));
     let isPlaying = (hasBrowser && !audio.paused) || (serverPlaying && !serverPaused);
 
-    // Sync Server
-    if (hasServer) {
-      if (isPlaying) {
-        if (!serverPlaying || serverPaused) {
-          try {
-            serverPlayAttemptTime = Date.now();
-            serverHasStarted = false;
-            serverPlaying = true;
-            serverPaused = false;
-            startServerPoll();
-            await api('POST', '/api/audio/player/play', {
-              path: t.path || '',
-              src: t.src || '',
-              title: t.title || '',
-              artist: t.artist || '',
-              album: t.album || '',
-              seek: curTime,
-              sinks: outputs.serverSinks,
-            });
-          } catch (err) {
-            serverPlaying = false;
-            serverPaused = false;
-            stopServerPoll();
-            report(err);
-          }
-        }
-      }
-    } else {
-      stopServerPoll();
-      api('POST', '/api/audio/player/stop').catch(() => {});
-      serverPlaying = false;
-      serverPaused = false;
-      serverHasStarted = false;
-    }
-
-    // Sync Browser
+    // Sync Browser immediately within the user gesture context
     if (hasBrowser) {
       if (!audio.src) {
         pendingSeek = curTime;
@@ -612,6 +577,46 @@ function mountMusic(win, args) {
     } else {
       if (!audio.paused) audio.pause();
       audio.removeAttribute('src');
+    }
+
+    // Sync Server concurrently
+    if (hasServer) {
+      if (isPlaying) {
+        if (!serverPlaying || serverPaused) {
+          try {
+            serverPlayAttemptTime = Date.now();
+            serverHasStarted = false;
+            serverPlaying = true;
+            serverPaused = false;
+            startServerPoll();
+            api('POST', '/api/audio/player/play', {
+              path: t.path || '',
+              src: t.src || '',
+              title: t.title || '',
+              artist: t.artist || '',
+              album: t.album || '',
+              seek: curTime,
+              sinks: outputs.serverSinks,
+            }).catch((err) => {
+              serverPlaying = false;
+              serverPaused = false;
+              stopServerPoll();
+              report(err);
+            });
+          } catch (err) {
+            serverPlaying = false;
+            serverPaused = false;
+            stopServerPoll();
+            report(err);
+          }
+        }
+      }
+    } else {
+      stopServerPoll();
+      api('POST', '/api/audio/player/stop').catch(() => {});
+      serverPlaying = false;
+      serverPaused = false;
+      serverHasStarted = false;
     }
 
     broadcast();
@@ -722,41 +727,7 @@ function mountMusic(win, args) {
     const startPos = pendingSeek || 0;
     pendingSeek = null;
 
-    if (hasServer) {
-      if (autoplay) {
-        try {
-          serverPlayAttemptTime = Date.now();
-          serverHasStarted = false;
-          serverPlaying = true;
-          serverPaused = false;
-          startServerPoll();
-          await api('POST', '/api/audio/player/play', {
-            path: t.path || '',
-            src: t.src || '',
-            title: t.title || '',
-            artist: t.artist || '',
-            album: t.album || '',
-            seek: startPos,
-            sinks: outputs.serverSinks,
-          });
-        } catch (err) {
-          serverPlaying = false;
-          serverPaused = false;
-          stopServerPoll();
-          report(err);
-        }
-      } else {
-        serverPlaying = false;
-        serverPaused = false;
-      }
-    } else {
-      stopServerPoll();
-      api('POST', '/api/audio/player/stop').catch(() => {});
-      serverPlaying = false;
-      serverPaused = false;
-      serverHasStarted = false;
-    }
-
+    // 1. Start Browser playback immediately in user gesture context
     if (hasBrowser) {
       audio.src = t.src;
       if (startPos > 0) audio.currentTime = startPos;
@@ -770,6 +741,40 @@ function mountMusic(win, args) {
     } else {
       if (!audio.paused) audio.pause();
       audio.removeAttribute('src');
+    }
+
+    // 2. Start Server playback concurrently (do not block browser audio with await)
+    if (hasServer) {
+      if (autoplay) {
+        serverPlayAttemptTime = Date.now();
+        serverHasStarted = false;
+        serverPlaying = true;
+        serverPaused = false;
+        startServerPoll();
+        api('POST', '/api/audio/player/play', {
+          path: t.path || '',
+          src: t.src || '',
+          title: t.title || '',
+          artist: t.artist || '',
+          album: t.album || '',
+          seek: startPos,
+          sinks: outputs.serverSinks,
+        }).catch((err) => {
+          serverPlaying = false;
+          serverPaused = false;
+          stopServerPoll();
+          report(err);
+        });
+      } else {
+        serverPlaying = false;
+        serverPaused = false;
+      }
+    } else {
+      stopServerPoll();
+      api('POST', '/api/audio/player/stop').catch(() => {});
+      serverPlaying = false;
+      serverPaused = false;
+      serverHasStarted = false;
     }
 
     if (autoplay) {
@@ -820,22 +825,36 @@ function mountMusic(win, args) {
     const isCurrentlyPlaying = (hasServer && serverPlaying && !serverPaused) || (hasBrowser && !audio.paused);
 
     if (isCurrentlyPlaying) {
-      // Pause all
-      if (hasServer && serverPlaying) {
-        await api('POST', '/api/audio/player/pause').catch(report);
-        serverPaused = true;
-      }
+      // 1. Pause browser immediately (synchronous)
       if (hasBrowser && !audio.paused) {
         audio.pause();
+      }
+      // 2. Pause server
+      if (hasServer && serverPlaying) {
+        serverPaused = true;
+        api('POST', '/api/audio/player/pause').catch(report);
       }
       playBtn.replaceChildren(icon('play', 20));
       playBtn.setAttribute('aria-label', 'Play');
     } else {
-      // Resume all
+      // 1. Resume browser immediately (synchronous within user gesture context)
+      if (hasBrowser) {
+        if (audio.src) {
+          audio.play().catch((err) => {
+            if (err.name !== 'NotAllowedError' && err.name !== 'AbortError' && !err.message?.includes('interrupted')) report(err);
+          });
+        } else if (queue[index]) {
+          audio.src = queue[index].src;
+          audio.play().catch((err) => {
+            if (err.name !== 'NotAllowedError' && err.name !== 'AbortError' && !err.message?.includes('interrupted')) report(err);
+          });
+        }
+      }
+      // 2. Resume server concurrently
       if (hasServer) {
         if (serverPlaying && serverPaused) {
-          await api('POST', '/api/audio/player/resume').catch(report);
           serverPaused = false;
+          api('POST', '/api/audio/player/resume').catch(report);
         } else {
           const t = queue[index];
           if (t) {
@@ -844,7 +863,7 @@ function mountMusic(win, args) {
             serverPlaying = true;
             serverPaused = false;
             startServerPoll();
-            await api('POST', '/api/audio/player/play', {
+            api('POST', '/api/audio/player/play', {
               path: t.path || '',
               src: t.src || '',
               title: t.title || '',
@@ -859,18 +878,6 @@ function mountMusic(win, args) {
               report(err);
             });
           }
-        }
-      }
-      if (hasBrowser) {
-        if (audio.src) {
-          audio.play().catch((err) => {
-            if (err.name !== 'NotAllowedError' && err.name !== 'AbortError' && !err.message?.includes('interrupted')) report(err);
-          });
-        } else if (queue[index]) {
-          audio.src = queue[index].src;
-          audio.play().catch((err) => {
-            if (err.name !== 'NotAllowedError' && err.name !== 'AbortError' && !err.message?.includes('interrupted')) report(err);
-          });
         }
       }
       playBtn.replaceChildren(icon('pause', 20));
@@ -1011,7 +1018,9 @@ function mountMusic(win, args) {
   });
   audio.addEventListener('error', () => {
     const outputs = getAudioOutputs();
-    if (outputs.browser && audio.src) report(new Error(`Cannot play ${queue[index]?.title || 'this file'} in this browser`));
+    if (outputs.browser && audio.src && audio.error && audio.error.code !== 1) {
+      report(new Error(`Cannot play ${queue[index]?.title || 'this file'} in this browser`));
+    }
   });
   seek.addEventListener('input', () => {
     seeking = true;
@@ -1052,6 +1061,15 @@ function mountMusic(win, args) {
     }
   });
   vol.style.setProperty('--fill', `${vol.value}%`);
+
+  const onBeforeUnload = () => {
+    try {
+      if (serverPlaying) {
+        navigator.sendBeacon('/api/audio/player/stop');
+      }
+    } catch {}
+  };
+  window.addEventListener('beforeunload', onBeforeUnload);
 
   const offOutputs = on('audio-outputs-changed', (outputs) => {
     syncPlaybackOutputs(outputs);
@@ -1175,11 +1193,10 @@ function mountMusic(win, args) {
     },
     stopMedia() {
       stopServerPoll();
-      if (serverPlaying) {
-        api('POST', '/api/audio/player/stop').catch(() => {});
-        serverPlaying = false;
-        serverPaused = false;
-      }
+      api('POST', '/api/audio/player/stop').catch(() => {});
+      serverPlaying = false;
+      serverPaused = false;
+      serverHasStarted = false;
       try {
         if (!audio.paused) audio.pause();
         audio.removeAttribute('src');
@@ -1191,12 +1208,12 @@ function mountMusic(win, args) {
     onDestroy() {
       if (typeof offOutputs === 'function') offOutputs();
       if (typeof offClientVol === 'function') offClientVol();
+      window.removeEventListener('beforeunload', onBeforeUnload);
       stopServerPoll();
-      if (serverPlaying) {
-        api('POST', '/api/audio/player/stop').catch(() => {});
-        serverPlaying = false;
-        serverPaused = false;
-      }
+      api('POST', '/api/audio/player/stop').catch(() => {});
+      serverPlaying = false;
+      serverPaused = false;
+      serverHasStarted = false;
       try {
         if (!audio.paused) audio.pause();
         audio.removeAttribute('src');

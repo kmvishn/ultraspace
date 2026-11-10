@@ -313,7 +313,8 @@ func (a *Audio) unloadCombineSinks(ctx context.Context) {
 	}
 }
 
-// moveSinkInputs safely moves all active audio playback streams to the specified sink.
+// moveSinkInputs safely moves active client audio playback streams (e.g. mpv, browser) to the specified sink.
+// It explicitly skips internal filter modules, combine-sink slave streams, and non-client streams.
 func (a *Audio) moveSinkInputs(ctx context.Context, targetSink string) {
 	inputsOut, err := a.runner.CombinedOutput(ctx, "pactl", "list", "sink-inputs", "short")
 	if err != nil {
@@ -321,9 +322,20 @@ func (a *Audio) moveSinkInputs(ctx context.Context, targetSink string) {
 	}
 	scanner := bufio.NewScanner(bytes.NewReader(inputsOut))
 	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) > 0 {
+		line := scanner.Text()
+		fields := strings.Fields(line)
+		if len(fields) >= 3 {
+			// fields[0]=inputID, fields[1]=sinkID, fields[2]=clientID, fields[3]=driver
+			// Internal filter/combine-sink slave streams have client ID "-" or module-combine-sink driver.
+			// NEVER move them, as doing so breaks combine-sink output slaves!
+			if fields[2] == "-" || strings.Contains(line, "module-combine-sink") || strings.Contains(line, "filter") {
+				continue
+			}
 			inputID := fields[0]
+			currentSink := fields[1]
+			if currentSink == targetSink {
+				continue
+			}
 			if _, err := strconv.Atoi(inputID); err == nil {
 				_, moveErr := a.runner.CombinedOutput(ctx, "pactl", "move-sink-input", inputID, targetSink)
 				if moveErr != nil {
@@ -645,6 +657,16 @@ func (a *Audio) handlePlayerPlay(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	targetSink := "combined"
+	if len(req.Sinks) == 1 {
+		targetSink = req.Sinks[0]
+	}
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		a.moveSinkInputs(context.Background(), targetSink)
+	}()
+
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "playing"})
 }
 
