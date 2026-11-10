@@ -255,15 +255,21 @@ func (a *Audio) GetStatus(ctx context.Context) (*Status, error) {
 	activeMute := false
 
 	for _, s := range allSinks {
-		// Hide the internal "combined" virtual sink from the device list,
+		// Hide virtual and combine sinks from the device list,
 		// so users see their physical/bluetooth hardware devices.
-		if s.Name == "combined" {
+		if strings.HasPrefix(s.Name, "combined") || s.Type == "virtual" {
+			if s.Name == defaultSink || (defaultSink == "combined" && s.Name == "combined") {
+				activeVol = s.Volume
+				activeMute = s.Mute
+			}
 			continue
 		}
 		if activeMap[s.Name] || (len(activeMap) == 0 && s.Active) {
 			s.Active = true
-			activeVol = s.Volume
-			activeMute = s.Mute
+			if !strings.HasPrefix(defaultSink, "combined") {
+				activeVol = s.Volume
+				activeMute = s.Mute
+			}
 		} else {
 			s.Active = false
 		}
@@ -285,12 +291,55 @@ func (a *Audio) GetStatus(ctx context.Context) (*Status, error) {
 	}, nil
 }
 
+// unloadCombineSinks unloads all existing module-combine-sink instances by numeric module ID.
+// PulseAudio requires integer IDs for module unloading (unloading by name fails).
+func (a *Audio) unloadCombineSinks(ctx context.Context) {
+	out, err := a.runner.CombinedOutput(ctx, "pactl", "list", "modules", "short")
+	if err != nil {
+		return
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.Contains(line, "module-combine-sink") {
+			fields := strings.Fields(line)
+			if len(fields) > 0 {
+				modID := fields[0]
+				if _, err := strconv.Atoi(modID); err == nil {
+					_, _ = a.runner.CombinedOutput(ctx, "pactl", "unload-module", modID)
+				}
+			}
+		}
+	}
+}
+
+// moveSinkInputs safely moves all active audio playback streams to the specified sink.
+func (a *Audio) moveSinkInputs(ctx context.Context, targetSink string) {
+	inputsOut, err := a.runner.CombinedOutput(ctx, "pactl", "list", "sink-inputs", "short")
+	if err != nil {
+		return
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(inputsOut))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) > 0 {
+			inputID := fields[0]
+			if _, err := strconv.Atoi(inputID); err == nil {
+				_, moveErr := a.runner.CombinedOutput(ctx, "pactl", "move-sink-input", inputID, targetSink)
+				if moveErr != nil {
+					a.log.Debug("move-sink-input failed", "id", inputID, "sink", targetSink, "err", moveErr)
+				}
+			}
+		}
+	}
+}
+
 // SetSinks sets one or multiple simultaneous audio output sinks using PulseAudio's module-combine-sink.
 func (a *Audio) SetSinks(ctx context.Context, sinks []string) error {
 	var cleanSinks []string
 	for _, s := range sinks {
 		s = strings.TrimSpace(s)
-		if s == "" || len(s) > 128 || strings.ContainsAny(s, "\r\n\x00, ") {
+		if s == "" || len(s) > 128 || strings.ContainsAny(s, "\r\n\x00, ") || strings.HasPrefix(s, "combined") || strings.HasPrefix(s, "null") {
 			continue
 		}
 		cleanSinks = append(cleanSinks, s)
@@ -316,28 +365,39 @@ func (a *Audio) SetSinks(ctx context.Context, sinks []string) error {
 	}
 
 	if len(cleanSinks) == 1 {
-		// Single sink: unload combine-sink module if loaded
-		_, _ = a.runner.CombinedOutput(ctx, "pactl", "unload-module", "module-combine-sink")
-		if err := a.SetDefaultSink(ctx, cleanSinks[0]); err != nil {
+		// Single sink: First migrate active streams to target BEFORE unloading combine sinks.
+		// This prevents PulseAudio from abruptly terminating streams when combined unloads.
+		target := cleanSinks[0]
+		if err := a.SetDefaultSink(ctx, target); err != nil {
 			return err
 		}
+		a.unloadCombineSinks(ctx)
+
 		a.mu.Lock()
 		a.activeSinks = cleanSinks
 		a.mu.Unlock()
 		return nil
 	}
 
-	// Multiple sinks: unload existing combine-sink module first
-	_, _ = a.runner.CombinedOutput(ctx, "pactl", "unload-module", "module-combine-sink")
+	// Multiple sinks:
+	// Move active streams to the primary sink temporarily so playback does not stall during unload
+	a.moveSinkInputs(ctx, cleanSinks[0])
+	a.unloadCombineSinks(ctx)
 
-	// Load module-combine-sink with comma-separated slaves
+	// Load module-combine-sink with resample_method and adjust_time for drift-free multi-rate sync
 	slaves := strings.Join(cleanSinks, ",")
-	out, err := a.runner.CombinedOutput(ctx, "pactl", "load-module", "module-combine-sink", "sink_name=combined", "slaves="+slaves, "sink_properties=device.description=Combined_Output")
+	out, err := a.runner.CombinedOutput(ctx, "pactl", "load-module", "module-combine-sink",
+		"sink_name=combined",
+		"slaves="+slaves,
+		"resample_method=speex-float-1",
+		"adjust_time=3",
+		"sink_properties=device.description=Combined_Output",
+	)
 	if err != nil {
 		return fmt.Errorf("load combine-sink: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 
-	// Set combined as default and move all active streams
+	// Set combined as default and move all active streams to it
 	if err := a.SetDefaultSink(ctx, "combined"); err != nil {
 		return err
 	}
@@ -363,23 +423,7 @@ func (a *Audio) SetDefaultSink(ctx context.Context, sinkName string) error {
 	}
 
 	// Move all currently active sink inputs to the new sink so ongoing audio switches immediately.
-	inputsOut, err := a.runner.CombinedOutput(ctx, "pactl", "list", "sink-inputs", "short")
-	if err == nil {
-		scanner := bufio.NewScanner(bytes.NewReader(inputsOut))
-		for scanner.Scan() {
-			fields := strings.Fields(scanner.Text())
-			if len(fields) > 0 {
-				inputID := fields[0]
-				if _, err := strconv.Atoi(inputID); err == nil {
-					_, moveErr := a.runner.CombinedOutput(ctx, "pactl", "move-sink-input", inputID, sinkName)
-					if moveErr != nil {
-						a.log.Debug("move-sink-input failed", "id", inputID, "sink", sinkName, "err", moveErr)
-					}
-				}
-			}
-		}
-	}
-
+	a.moveSinkInputs(ctx, sinkName)
 	return nil
 }
 

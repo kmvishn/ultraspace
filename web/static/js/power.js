@@ -118,3 +118,4 @@ export async function promptRestartService() {
     toast(`Restart service failed: ${err.message}`, 'error');
   }
 }
+

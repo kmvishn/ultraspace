@@ -41,7 +41,11 @@ export async function toggleBrowserOutput() {
 }
 
 export async function toggleServerSink(sinkName) {
+  if (!sinkName || sinkName.startsWith('combined') || sinkName.startsWith('null')) {
+    return getAudioOutputs();
+  }
   const current = getAudioOutputs();
+  current.serverSinks = current.serverSinks.filter(s => !s.startsWith('combined') && !s.startsWith('null'));
   const idx = current.serverSinks.indexOf(sinkName);
   if (idx >= 0) {
     current.serverSinks.splice(idx, 1);
@@ -68,7 +72,7 @@ export async function toggleServerSink(sinkName) {
 
 export async function setAllServerSinks(sinkNames) {
   const current = getAudioOutputs();
-  current.serverSinks = [...sinkNames];
+  current.serverSinks = (sinkNames || []).filter(s => s && !s.startsWith('combined') && !s.startsWith('null'));
   if (!current.browser && current.serverSinks.length === 0) {
     current.browser = true;
   }

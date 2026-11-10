@@ -598,13 +598,17 @@ function mountMusic(win, args) {
     // Sync Browser
     if (hasBrowser) {
       if (!audio.src) {
+        pendingSeek = curTime;
         audio.src = t.src;
-        audio.currentTime = curTime;
       }
       if (isPlaying && audio.paused) {
-        audio.currentTime = curTime;
+        if (audio.readyState >= 1) {
+          audio.currentTime = curTime;
+        } else {
+          pendingSeek = curTime;
+        }
         audio.play().catch((err) => {
-          if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') report(err);
+          if (err.name !== 'NotAllowedError' && err.name !== 'AbortError' && !err.message?.includes('interrupted')) report(err);
         });
       }
     } else {
@@ -653,12 +657,26 @@ function mountMusic(win, args) {
           playBtn.setAttribute('aria-label', st.paused ? 'Play' : 'Pause');
           markPlaying();
         } else if (serverHasStarted && serverPlaying && !serverPaused) {
-          if (!isAdvancing) {
-            isAdvancing = true;
+          const d = st.duration || queue[index]?.duration || 0;
+          const pos = Number.isFinite(st.current_time) ? st.current_time : ((seek.value / 1000) * d);
+          const reachedEnd = (d > 0 && pos >= (d - 3));
+
+          if (reachedEnd) {
+            if (!isAdvancing) {
+              isAdvancing = true;
+              serverPlaying = false;
+              serverHasStarted = false;
+              next(false);
+              setTimeout(() => { isAdvancing = false; }, 1000);
+            }
+          } else {
+            // Premature exit (e.g. format error, sink switch, manual stop) - do not skip entire queue!
             serverPlaying = false;
             serverHasStarted = false;
-            next(false);
-            setTimeout(() => { isAdvancing = false; }, 1000);
+            stopServerPoll();
+            markPlaying();
+            playBtn.replaceChildren(icon('play', 20));
+            playBtn.setAttribute('aria-label', 'Play');
           }
         } else if (!serverHasStarted && (Date.now() - serverPlayAttemptTime > 7000)) {
           serverPlaying = false;
@@ -748,7 +766,7 @@ function mountMusic(win, args) {
       if (startPos > 0) audio.currentTime = startPos;
       if (autoplay) {
         audio.play().catch((err) => {
-          if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') {
+          if (err.name !== 'NotAllowedError' && err.name !== 'AbortError' && !err.message?.includes('interrupted')) {
             report(new Error(`Cannot play ${t.title}: ${err.message}`));
           }
         });
@@ -850,12 +868,12 @@ function mountMusic(win, args) {
       if (hasBrowser) {
         if (audio.src) {
           audio.play().catch((err) => {
-            if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') report(err);
+            if (err.name !== 'NotAllowedError' && err.name !== 'AbortError' && !err.message?.includes('interrupted')) report(err);
           });
         } else if (queue[index]) {
           audio.src = queue[index].src;
           audio.play().catch((err) => {
-            if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') report(err);
+            if (err.name !== 'NotAllowedError' && err.name !== 'AbortError' && !err.message?.includes('interrupted')) report(err);
           });
         }
       }
@@ -1018,15 +1036,23 @@ function mountMusic(win, args) {
     }
     seeking = false;
   });
-  vol.addEventListener('input', async () => {
-    audio.volume = vol.value / 100;
-    audio.muted = false;
-    vol.style.setProperty('--fill', `${vol.value}%`);
-    try { localStorage.setItem('us.volume', String(audio.volume)); } catch { /* ignore */ }
-    updateVol();
+  let volDebounce = null;
+  vol.addEventListener('input', () => {
     const outputs = getAudioOutputs();
+    const v = vol.value / 100;
+    if (outputs.browser) {
+      audio.volume = v;
+      audio.muted = (v === 0);
+    }
+    vol.style.setProperty('--fill', `${vol.value}%`);
+    try { localStorage.setItem('us.volume', String(v)); } catch { /* ignore */ }
+    updateVol();
+
     if (outputs.serverSinks && outputs.serverSinks.length > 0) {
-      await api('POST', '/api/audio/volume', { volume: parseInt(vol.value, 10) }).catch(() => {});
+      clearTimeout(volDebounce);
+      volDebounce = setTimeout(() => {
+        api('POST', '/api/audio/volume', { volume: parseInt(vol.value, 10) }).catch(() => {});
+      }, 50);
     }
   });
   vol.style.setProperty('--fill', `${vol.value}%`);

@@ -200,14 +200,26 @@ function mountSettings(win, args) {
             },
           }, icon(s.mute ? 'volumeX' : 'volume', 15));
 
+          let sVolDebounce = null;
           const sSlider = h('input', {
             type: 'range', min: '0', max: '100', value: String(s.volume), class: 'slider',
             style: { flex: '1', accentColor: 'var(--accent)' },
             oninput: () => {
               sVolNum.textContent = `${sSlider.value}%`;
               sSlider.style.setProperty('--fill', `${sSlider.value}%`);
+              clearTimeout(sVolDebounce);
+              sVolDebounce = setTimeout(async () => {
+                try {
+                  const vol = parseInt(sSlider.value, 10);
+                  await api('POST', '/api/audio/volume', { sink: s.name, volume: vol });
+                  s.volume = vol;
+                } catch (err) {
+                  report(err);
+                }
+              }, 60);
             },
             onchange: async () => {
+              clearTimeout(sVolDebounce);
               try {
                 const vol = parseInt(sSlider.value, 10);
                 await api('POST', '/api/audio/volume', { sink: s.name, volume: vol });
@@ -295,11 +307,22 @@ function mountSettings(win, args) {
       }
     }
 
+    let masterVolDebounce = null;
     volSlider.oninput = () => {
       volNum.textContent = `${volSlider.value}%`;
+      volSlider.style.setProperty('--fill', `${volSlider.value}%`);
+      clearTimeout(masterVolDebounce);
+      masterVolDebounce = setTimeout(async () => {
+        try {
+          await api('POST', '/api/audio/volume', { volume: parseInt(volSlider.value, 10) });
+        } catch (err) {
+          report(err);
+        }
+      }, 60);
     };
 
     volSlider.onchange = async () => {
+      clearTimeout(masterVolDebounce);
       isUpdating = true;
       try {
         await api('POST', '/api/audio/volume', { volume: parseInt(volSlider.value, 10) });
