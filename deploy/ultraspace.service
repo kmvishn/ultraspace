@@ -35,7 +35,7 @@ ProtectKernelLogs=yes
 ProtectControlGroups=yes
 ProtectClock=yes
 ProtectHostname=yes
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_BLUETOOTH AF_NETLINK
 # Chrome's own sandbox needs user, PID and network namespaces (see apparmor-ultraspace-chrome).
 RestrictNamespaces=user pid net
 RestrictRealtime=yes

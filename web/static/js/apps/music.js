@@ -3,6 +3,7 @@
 import { h, icon, api, report, toast, emit, on, menu, fmtClock, fmtBytes, fmtDuration, extOf, dirOf, baseOf, fileUrl, debounce, uploadWithProgress } from '../core.js';
 import { registerApp, openApp } from '../wm.js';
 import { nd } from './music-navidrome.js';
+import { openAudioOutputsPopover, getAudioOutputs } from '../audio-target.js';
 
 registerApp({
   id: 'music', name: 'Music', icon: 'music', color: ['#fb7185', '#e11d48'], width: 1080, height: 700, minWidth: 520, single: true,
@@ -97,10 +98,13 @@ function mountMusic(win, args) {
   const tDur = h('span', { class: 'p-time' }, '0:00');
   const targetBtn = h('button', {
     class: 'icon-btn p-target',
-    'aria-label': 'Audio Output Device',
-    title: audioTarget === 'server' ? 'Playing on Server Hardware' : 'Playing on This Browser',
-    onclick: (e) => openTargetMenu(e),
-  }, icon(audioTarget === 'server' ? 'volume2' : 'laptop', 16));
+    'aria-label': 'Audio Output Devices',
+    title: 'Audio Output Devices',
+    onclick: (e) => {
+      e.stopPropagation();
+      openAudioOutputsPopover(targetBtn);
+    },
+  }, icon('volume2', 16));
   const volBtn = h('button', { class: 'icon-btn', 'aria-label': 'Mute', onclick: () => toggleMute() }, icon('volume', 16));
   const vol = h('input', { type: 'range', class: 'range vol', min: '0', max: '100', value: String(Math.round(audio.volume * 100)), 'aria-label': 'Volume' });
 
@@ -524,123 +528,76 @@ function mountMusic(win, args) {
 
   // ---------- playback ----------
 
-  async function openTargetMenu(e) {
-    e.stopPropagation();
-    const r = targetBtn.getBoundingClientRect();
-    let st = null;
-    try { st = await api('GET', '/api/audio/status'); } catch {}
-
-    const items = [
-      { label: 'Audio Playback Target', disabled: true },
-      {
-        label: 'This Device (Browser)',
-        icon: 'laptop',
-        hint: audioTarget === 'browser' ? '✓ Active' : '',
-        action: () => switchTarget('browser'),
-      },
-    ];
-
-    if (st?.available && st.sinks?.length) {
-      items.push('-');
-      items.push({ label: 'Server Speakers & Outputs', disabled: true });
-      for (const s of st.sinks) {
-        let ic = 'volume';
-        if (s.type === 'bluetooth') ic = 'bluetooth';
-        else if (s.type === 'hdmi') ic = 'tv';
-        else if (s.type === 'usb') ic = 'sliders';
-
-        const isCurrentActive = (audioTarget === 'server' && s.active);
-        items.push({
-          label: s.description || s.name,
-          icon: ic,
-          hint: isCurrentActive ? '✓ Active' : (s.active ? '(Default Server Sink)' : ''),
-          action: async () => {
-            try {
-              if (!s.active) {
-                await api('POST', '/api/audio/sink', { sink: s.name });
-              }
-              switchTarget('server', s);
-            } catch (err) {
-              report(err);
-            }
-          },
-        });
-      }
+  function updateTargetBtnUI() {
+    const outputs = getAudioOutputs();
+    const count = (outputs.browser ? 1 : 0) + (outputs.serverSinks?.length || 0);
+    if (outputs.browser && (!outputs.serverSinks || outputs.serverSinks.length === 0)) {
+      targetBtn.replaceChildren(icon('laptop', 16));
+      targetBtn.title = 'Audio Output: This Browser';
+    } else if (!outputs.browser && outputs.serverSinks?.length === 1) {
+      targetBtn.replaceChildren(icon('volume2', 16));
+      targetBtn.title = 'Audio Output: Server Speaker';
+    } else {
+      targetBtn.replaceChildren(icon('volume2', 16));
+      targetBtn.title = `Audio Output: ${count} devices active`;
     }
-
-    items.push('-');
-    items.push({
-      label: 'Sound & Audio Settings…',
-      icon: 'sliders',
-      action: () => openApp('settings', { section: 'sound' }),
-    });
-
-    menu(r.left, r.bottom + 6, items);
   }
 
-  async function switchTarget(newTarget, sink) {
-    if (audioTarget === newTarget && (!sink || sink.active)) return;
-
-    const prevTarget = audioTarget;
-    audioTarget = newTarget;
-    localStorage.setItem('us.audio_target', newTarget);
-    targetBtn.replaceChildren(icon(newTarget === 'server' ? 'volume2' : 'laptop', 16));
-    targetBtn.title = newTarget === 'server' ? `Playing on Server (${sink?.description || 'Hardware'})` : 'Playing on This Browser';
-
+  async function syncPlaybackOutputs(outputs) {
+    updateTargetBtnUI();
     const t = queue[index];
     if (!t) return;
 
-    if (prevTarget === 'browser' && newTarget === 'server') {
-      const curTime = audio.currentTime || 0;
-      const wasPlaying = !audio.paused;
-      audio.pause();
-      if (wasPlaying) {
-        try {
-          await api('POST', '/api/audio/player/play', {
-            path: t.path || '',
-            src: t.src || '',
-            title: t.title || '',
-            artist: t.artist || '',
-            album: t.album || '',
-            seek: curTime,
-          });
-          serverPlaying = true;
-          serverPaused = false;
-          playBtn.replaceChildren(icon('pause', 20));
-          startServerPoll();
-          toast(`Switched audio playback to server (${sink?.description || 'Speaker'})`);
-        } catch (err) {
-          report(err);
-          audioTarget = 'browser';
-          localStorage.setItem('us.audio_target', 'browser');
-          targetBtn.replaceChildren(icon('laptop', 16));
-          audio.play();
+    const hasServer = outputs.serverSinks && outputs.serverSinks.length > 0;
+    const hasBrowser = !!outputs.browser;
+
+    let curTime = audio.currentTime || 0;
+    let isPlaying = (hasBrowser && !audio.paused) || (serverPlaying && !serverPaused);
+
+    // Sync Server
+    if (hasServer) {
+      if (isPlaying) {
+        if (!serverPlaying || serverPaused) {
+          try {
+            await api('POST', '/api/audio/player/play', {
+              path: t.path || '',
+              src: t.src || '',
+              title: t.title || '',
+              artist: t.artist || '',
+              album: t.album || '',
+              seek: curTime,
+            });
+            serverPlaying = true;
+            serverPaused = false;
+            startServerPoll();
+          } catch (err) {
+            report(err);
+          }
         }
       }
-    } else if (prevTarget === 'server' && newTarget === 'browser') {
-      let curTime = 0;
-      let wasPlaying = serverPlaying && !serverPaused;
-      try {
-        const st = await api('GET', '/api/audio/player/status');
-        if (st) {
-          curTime = st.current_time || 0;
-          if (st.playing && !st.paused) wasPlaying = true;
-        }
-        await api('POST', '/api/audio/player/stop');
-      } catch {}
-      serverPlaying = false;
-      serverPaused = false;
+    } else {
       stopServerPoll();
+      if (serverPlaying) {
+        api('POST', '/api/audio/player/stop').catch(() => {});
+        serverPlaying = false;
+        serverPaused = false;
+      }
+    }
 
-      audio.src = t.src;
-      audio.currentTime = curTime;
-      if (wasPlaying) {
+    // Sync Browser
+    if (hasBrowser) {
+      if (!audio.src) {
+        audio.src = t.src;
+        audio.currentTime = curTime;
+      }
+      if (isPlaying && audio.paused) {
+        audio.currentTime = curTime;
         audio.play().catch(report);
       }
-      toast('Switched audio playback to this browser');
-    } else if (newTarget === 'server' && serverPlaying) {
-      toast(`Switched server output to ${sink?.description || 'selected speaker'}`);
+    } else {
+      if (!audio.paused) audio.pause();
     }
+
     broadcast();
     markPlaying();
   }
@@ -648,7 +605,8 @@ function mountMusic(win, args) {
   function startServerPoll() {
     if (serverPollTimer) return;
     serverPollTimer = setInterval(async () => {
-      if (audioTarget !== 'server' || !serverPlaying) return;
+      const outputs = getAudioOutputs();
+      if (!outputs.serverSinks || outputs.serverSinks.length === 0 || !serverPlaying) return;
       try {
         const st = await api('GET', '/api/audio/player/status');
         if (!st) return;
@@ -661,6 +619,11 @@ function mountMusic(win, args) {
           seek.value = String(Math.round((1000 * st.current_time) / d));
           seek.style.setProperty('--fill', `${(100 * st.current_time) / d}%`);
           tCur.textContent = fmtClock(st.current_time);
+
+          // If browser is also playing concurrently, keep them tightly synced if drift exceeds 1.5s
+          if (outputs.browser && !audio.paused && Math.abs(audio.currentTime - st.current_time) > 1.5) {
+            audio.currentTime = st.current_time;
+          }
         }
         if (st.playing) {
           serverPaused = st.paused;
@@ -702,8 +665,14 @@ function mountMusic(win, args) {
     tDur.textContent = t.duration ? fmtClock(t.duration) : '0:00';
     updateHeart();
 
-    if (audioTarget === 'server') {
-      if (!audio.paused) audio.pause();
+    const outputs = getAudioOutputs();
+    const hasServer = outputs.serverSinks && outputs.serverSinks.length > 0;
+    const hasBrowser = !!outputs.browser;
+
+    const startPos = pendingSeek || 0;
+    pendingSeek = null;
+
+    if (hasServer) {
       if (autoplay) {
         try {
           await api('POST', '/api/audio/player/play', {
@@ -712,13 +681,10 @@ function mountMusic(win, args) {
             title: t.title || '',
             artist: t.artist || '',
             album: t.album || '',
-            seek: pendingSeek || 0,
+            seek: startPos,
           });
-          pendingSeek = null;
           serverPlaying = true;
           serverPaused = false;
-          playBtn.replaceChildren(icon('pause', 20));
-          playBtn.setAttribute('aria-label', 'Pause');
           startServerPoll();
         } catch (err) {
           report(err);
@@ -726,8 +692,6 @@ function mountMusic(win, args) {
       } else {
         serverPlaying = false;
         serverPaused = false;
-        playBtn.replaceChildren(icon('play', 20));
-        playBtn.setAttribute('aria-label', 'Play');
       }
     } else {
       stopServerPoll();
@@ -736,8 +700,27 @@ function mountMusic(win, args) {
         serverPlaying = false;
         serverPaused = false;
       }
+    }
+
+    if (hasBrowser) {
       audio.src = t.src;
-      if (autoplay) audio.play().catch((err) => { if (err.name !== 'NotAllowedError') report(new Error(`Cannot play ${t.title}: ${err.message}`)); });
+      if (startPos > 0) audio.currentTime = startPos;
+      if (autoplay) {
+        audio.play().catch((err) => {
+          if (err.name !== 'NotAllowedError') report(new Error(`Cannot play ${t.title}: ${err.message}`));
+        });
+      }
+    } else {
+      if (!audio.paused) audio.pause();
+      audio.removeAttribute('src');
+    }
+
+    if (autoplay) {
+      playBtn.replaceChildren(icon('pause', 20));
+      playBtn.setAttribute('aria-label', 'Pause');
+    } else {
+      playBtn.replaceChildren(icon('play', 20));
+      playBtn.setAttribute('aria-label', 'Play');
     }
 
     if ('mediaSession' in navigator) {
@@ -749,6 +732,7 @@ function mountMusic(win, args) {
     if (t.nd && autoplay) nd.call('scrobble', { id: t.id, submission: false }).catch(() => {});
     markPlaying();
     broadcast();
+    updateTargetBtnUI();
   }
 
   function updateHeart() {
@@ -759,7 +743,8 @@ function mountMusic(win, args) {
 
   function markPlaying() {
     const current = queue[index]?.key;
-    const isPaused = audioTarget === 'server' ? serverPaused : audio.paused;
+    const outputs = getAudioOutputs();
+    const isPaused = (outputs.serverSinks?.length && serverPlaying) ? serverPaused : audio.paused;
     content.querySelectorAll('tr[data-key]').forEach((tr) => tr.classList.toggle('playing', tr.dataset.key === current));
     content.classList.toggle('paused', isPaused);
   }
@@ -771,42 +756,82 @@ function mountMusic(win, args) {
       return;
     }
 
-    if (audioTarget === 'server') {
-      if (serverPlaying && !serverPaused) {
+    const outputs = getAudioOutputs();
+    const hasServer = outputs.serverSinks && outputs.serverSinks.length > 0;
+    const hasBrowser = !!outputs.browser;
+
+    const isCurrentlyPlaying = (hasServer && serverPlaying && !serverPaused) || (hasBrowser && !audio.paused);
+
+    if (isCurrentlyPlaying) {
+      // Pause all
+      if (hasServer && serverPlaying) {
         await api('POST', '/api/audio/player/pause').catch(report);
         serverPaused = true;
-        playBtn.replaceChildren(icon('play', 20));
-        playBtn.setAttribute('aria-label', 'Play');
-      } else if (serverPlaying && serverPaused) {
-        await api('POST', '/api/audio/player/resume').catch(report);
-        serverPaused = false;
-        playBtn.replaceChildren(icon('pause', 20));
-        playBtn.setAttribute('aria-label', 'Pause');
-      } else {
-        load(true);
       }
-      broadcast();
-      markPlaying();
+      if (hasBrowser && !audio.paused) {
+        audio.pause();
+      }
+      playBtn.replaceChildren(icon('play', 20));
+      playBtn.setAttribute('aria-label', 'Play');
     } else {
-      audio.paused ? audio.play().catch(report) : audio.pause();
+      // Resume all
+      if (hasServer) {
+        if (serverPlaying && serverPaused) {
+          await api('POST', '/api/audio/player/resume').catch(report);
+          serverPaused = false;
+        } else {
+          const t = queue[index];
+          if (t) {
+            await api('POST', '/api/audio/player/play', {
+              path: t.path || '',
+              src: t.src || '',
+              title: t.title || '',
+              artist: t.artist || '',
+              album: t.album || '',
+              seek: audio.currentTime || 0,
+            }).catch(report);
+            serverPlaying = true;
+            serverPaused = false;
+            startServerPoll();
+          }
+        }
+      }
+      if (hasBrowser) {
+        if (audio.src) {
+          audio.play().catch(report);
+        } else if (queue[index]) {
+          audio.src = queue[index].src;
+          audio.play().catch(report);
+        }
+      }
+      playBtn.replaceChildren(icon('pause', 20));
+      playBtn.setAttribute('aria-label', 'Pause');
     }
+    broadcast();
+    markPlaying();
   }
 
   function toggleMute() {
     audio.muted = !audio.muted;
     updateVol();
-    if (audioTarget === 'server') {
+    const outputs = getAudioOutputs();
+    if (outputs.serverSinks && outputs.serverSinks.length > 0) {
       api('POST', '/api/audio/mute', { mute: audio.muted }).catch(() => {});
     }
   }
 
   function next(manual) {
     if (!queue.length) return;
+    const outputs = getAudioOutputs();
+    const hasServer = outputs.serverSinks && outputs.serverSinks.length > 0;
+    const hasBrowser = !!outputs.browser;
+
     if (repeat === 'one' && !manual) {
-      if (audioTarget === 'server') {
+      if (hasServer) {
         api('POST', '/api/audio/player/seek', { time: 0 }).catch(() => {});
         api('POST', '/api/audio/player/resume').catch(() => {});
-      } else {
+      }
+      if (hasBrowser) {
         audio.currentTime = 0;
         audio.play();
       }
@@ -821,10 +846,11 @@ function mountMusic(win, args) {
     } else if (repeat === 'all' || manual) {
       index = 0;
     } else {
-      if (audioTarget === 'server') {
+      if (hasServer) {
         api('POST', '/api/audio/player/pause').catch(() => {});
         serverPaused = true;
-      } else {
+      }
+      if (hasBrowser) {
         audio.pause();
       }
       broadcast();
@@ -836,11 +862,14 @@ function mountMusic(win, args) {
 
   function prev() {
     if (!queue.length) return;
-    const cur = audioTarget === 'server' ? (seek.value / 1000) * (queue[index]?.duration || 1) : audio.currentTime;
+    const outputs = getAudioOutputs();
+    const hasServer = outputs.serverSinks && outputs.serverSinks.length > 0;
+    const cur = hasServer ? (seek.value / 1000) * (queue[index]?.duration || 1) : audio.currentTime;
     if (cur > 3) {
-      if (audioTarget === 'server') {
+      if (hasServer) {
         api('POST', '/api/audio/player/seek', { time: 0 }).catch(() => {});
-      } else {
+      }
+      if (outputs.browser) {
         audio.currentTime = 0;
       }
       return;
@@ -862,18 +891,20 @@ function mountMusic(win, args) {
   }
 
   function broadcast() {
-    const isPlaying = audioTarget === 'server' ? (serverPlaying && !serverPaused) : !audio.paused;
+    const outputs = getAudioOutputs();
+    const isPlaying = (outputs.serverSinks?.length && serverPlaying && !serverPaused) || (outputs.browser && !audio.paused);
     if (isPlaying) {
       document.body.dataset.serverMediaPlaying = '1';
     } else {
       delete document.body.dataset.serverMediaPlaying;
     }
-    emit('music', { track: queue[index] || null, playing: isPlaying, target: audioTarget });
+    emit('music', { track: queue[index] || null, playing: isPlaying, outputs });
   }
 
   let seeking = false;
   audio.addEventListener('timeupdate', () => {
-    if (audioTarget === 'server') return;
+    const outputs = getAudioOutputs();
+    if (!outputs.browser && outputs.serverSinks?.length) return;
     const d = audio.duration || queue[index]?.duration;
     if (seeking || !d || !Number.isFinite(d)) return;
     seek.value = String(Math.round((1000 * audio.currentTime) / d));
@@ -890,10 +921,29 @@ function mountMusic(win, args) {
     if (Number.isFinite(audio.duration)) tDur.textContent = fmtClock(audio.duration);
     if (pendingSeek != null) { audio.currentTime = Math.min(pendingSeek, audio.duration || pendingSeek); pendingSeek = null; }
   });
-  audio.addEventListener('play', () => { if (audioTarget === 'browser') { playBtn.replaceChildren(icon('pause', 20)); playBtn.setAttribute('aria-label', 'Pause'); broadcast(); markPlaying(); } });
-  audio.addEventListener('pause', () => { if (audioTarget === 'browser') { playBtn.replaceChildren(icon('play', 20)); playBtn.setAttribute('aria-label', 'Play'); broadcast(); markPlaying(); } });
-  audio.addEventListener('ended', () => { if (audioTarget === 'browser') next(false); });
-  audio.addEventListener('error', () => { if (audioTarget === 'browser' && audio.src) report(new Error(`Cannot play ${queue[index]?.title || 'this file'} in this browser`)); });
+  audio.addEventListener('play', () => {
+    playBtn.replaceChildren(icon('pause', 20));
+    playBtn.setAttribute('aria-label', 'Pause');
+    broadcast();
+    markPlaying();
+  });
+  audio.addEventListener('pause', () => {
+    const outputs = getAudioOutputs();
+    if (!outputs.serverSinks?.length || !serverPlaying || serverPaused) {
+      playBtn.replaceChildren(icon('play', 20));
+      playBtn.setAttribute('aria-label', 'Play');
+    }
+    broadcast();
+    markPlaying();
+  });
+  audio.addEventListener('ended', () => {
+    const outputs = getAudioOutputs();
+    if (!outputs.serverSinks?.length) next(false);
+  });
+  audio.addEventListener('error', () => {
+    const outputs = getAudioOutputs();
+    if (outputs.browser && audio.src) report(new Error(`Cannot play ${queue[index]?.title || 'this file'} in this browser`));
+  });
   seek.addEventListener('input', () => {
     seeking = true;
     seek.style.setProperty('--fill', `${seek.value / 10}%`);
@@ -903,10 +953,12 @@ function mountMusic(win, args) {
   seek.addEventListener('change', async () => {
     const d = audio.duration || queue[index]?.duration || 1;
     const targetSec = (seek.value / 1000) * d;
-    if (audioTarget === 'server') {
+    const outputs = getAudioOutputs();
+    if (outputs.serverSinks && outputs.serverSinks.length > 0) {
       await api('POST', '/api/audio/player/seek', { time: targetSec }).catch(report);
       tCur.textContent = fmtClock(targetSec);
-    } else {
+    }
+    if (outputs.browser) {
       audio.currentTime = targetSec;
     }
     seeking = false;
@@ -917,16 +969,15 @@ function mountMusic(win, args) {
     vol.style.setProperty('--fill', `${vol.value}%`);
     try { localStorage.setItem('us.volume', String(audio.volume)); } catch { /* ignore */ }
     updateVol();
-    if (audioTarget === 'server') {
+    const outputs = getAudioOutputs();
+    if (outputs.serverSinks && outputs.serverSinks.length > 0) {
       await api('POST', '/api/audio/volume', { volume: parseInt(vol.value, 10) }).catch(() => {});
     }
   });
   vol.style.setProperty('--fill', `${vol.value}%`);
 
-  const offTarget = on('audio-target-changed', (ev) => {
-    if (ev?.target && ev.target !== audioTarget) {
-      switchTarget(ev.target);
-    }
+  const offOutputs = on('audio-outputs-changed', (outputs) => {
+    syncPlaybackOutputs(outputs);
   });
   win.body.addEventListener('keydown', (e) => {
     if (e.target.closest('input, textarea')) return;
@@ -1054,7 +1105,7 @@ function mountMusic(win, args) {
       try { emit('music', null); } catch {}
     },
     onDestroy() {
-      if (typeof offTarget === 'function') offTarget();
+      if (typeof offOutputs === 'function') offOutputs();
       stopServerPoll();
       if (serverPlaying) {
         api('POST', '/api/audio/player/stop').catch(() => {});

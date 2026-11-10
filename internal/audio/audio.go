@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"ultraspace/internal/httpx"
@@ -42,15 +43,21 @@ type Sink struct {
 
 // Status represents the overall audio state on the server.
 type Status struct {
-	Available   bool   `json:"available"`
-	DefaultSink string `json:"default_sink"`
-	Volume      int    `json:"volume"`
-	Mute        bool   `json:"mute"`
-	Sinks       []Sink `json:"sinks"`
+	Available    bool     `json:"available"`
+	DefaultSink  string   `json:"default_sink"`
+	Volume       int      `json:"volume"`
+	Mute         bool     `json:"mute"`
+	Sinks        []Sink   `json:"sinks"`
+	ActiveSinks  []string `json:"active_sinks"`
+	CombinedSink bool     `json:"combined_sink"`
 }
 
 type SetSinkRequest struct {
 	Sink string `json:"sink"`
+}
+
+type SetSinksRequest struct {
+	Sinks []string `json:"sinks"`
 }
 
 type SetVolumeRequest struct {
@@ -65,9 +72,11 @@ type SetMuteRequest struct {
 
 // Audio manages PulseAudio/PipeWire interactions and server playback.
 type Audio struct {
-	log    *slog.Logger
-	runner Runner
-	player *Player
+	log         *slog.Logger
+	runner      Runner
+	player      *Player
+	mu          sync.RWMutex
+	activeSinks []string
 }
 
 // New creates an Audio service with execRunner and server Player.
@@ -107,6 +116,7 @@ func (a *Audio) Close() {
 func (a *Audio) Register(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
 	mux.Handle("GET /api/audio/status", auth(http.HandlerFunc(a.handleStatus)))
 	mux.Handle("POST /api/audio/sink", auth(http.HandlerFunc(a.handleSetSink)))
+	mux.Handle("POST /api/audio/sinks", auth(http.HandlerFunc(a.handleSetSinks)))
 	mux.Handle("POST /api/audio/volume", auth(http.HandlerFunc(a.handleSetVolume)))
 	mux.Handle("POST /api/audio/mute", auth(http.HandlerFunc(a.handleSetMute)))
 	mux.Handle("POST /api/audio/test", auth(http.HandlerFunc(a.handlePlayTestSound)))
@@ -220,31 +230,99 @@ func (a *Audio) GetStatus(ctx context.Context) (*Status, error) {
 	if err != nil {
 		return &Status{Available: false, Sinks: []Sink{}}, nil
 	}
-	sinks := ParseSinks(sinksOut, defaultSink)
+	allSinks := ParseSinks(sinksOut, defaultSink)
 
-	// If default sink was not set or empty, pick the first sink
-	if defaultSink == "" && len(sinks) > 0 {
-		defaultSink = sinks[0].Name
-		sinks[0].Active = true
+	a.mu.Lock()
+	if len(a.activeSinks) == 0 && defaultSink != "" && defaultSink != "combined" {
+		a.activeSinks = []string{defaultSink}
 	}
+	activeMap := make(map[string]bool)
+	for _, s := range a.activeSinks {
+		activeMap[s] = true
+	}
+	a.mu.Unlock()
 
+	var sinks []Sink
 	activeVol := 100
 	activeMute := false
-	for _, s := range sinks {
-		if s.Active {
+
+	for _, s := range allSinks {
+		// Hide the internal "combined" virtual sink from the device list,
+		// so users see their physical/bluetooth hardware devices.
+		if s.Name == "combined" {
+			continue
+		}
+		if activeMap[s.Name] || (len(activeMap) == 0 && s.Active) {
+			s.Active = true
 			activeVol = s.Volume
 			activeMute = s.Mute
-			break
+		} else {
+			s.Active = false
 		}
+		sinks = append(sinks, s)
 	}
 
+	a.mu.RLock()
+	currentActive := append([]string{}, a.activeSinks...)
+	a.mu.RUnlock()
+
 	return &Status{
-		Available:   true,
-		DefaultSink: defaultSink,
-		Volume:      activeVol,
-		Mute:        activeMute,
-		Sinks:       sinks,
+		Available:    true,
+		DefaultSink:  defaultSink,
+		Volume:       activeVol,
+		Mute:         activeMute,
+		Sinks:        sinks,
+		ActiveSinks:  currentActive,
+		CombinedSink: defaultSink == "combined",
 	}, nil
+}
+
+// SetSinks sets one or multiple simultaneous audio output sinks using PulseAudio's module-combine-sink.
+func (a *Audio) SetSinks(ctx context.Context, sinks []string) error {
+	var cleanSinks []string
+	for _, s := range sinks {
+		s = strings.TrimSpace(s)
+		if s == "" || len(s) > 128 || strings.ContainsAny(s, "\r\n\x00, ") {
+			continue
+		}
+		cleanSinks = append(cleanSinks, s)
+	}
+
+	if len(cleanSinks) == 0 {
+		return errors.New("at least one valid sink required")
+	}
+
+	if len(cleanSinks) == 1 {
+		// Single sink: unload combine-sink module if loaded
+		_, _ = a.runner.CombinedOutput(ctx, "pactl", "unload-module", "module-combine-sink")
+		if err := a.SetDefaultSink(ctx, cleanSinks[0]); err != nil {
+			return err
+		}
+		a.mu.Lock()
+		a.activeSinks = cleanSinks
+		a.mu.Unlock()
+		return nil
+	}
+
+	// Multiple sinks: unload existing combine-sink module first
+	_, _ = a.runner.CombinedOutput(ctx, "pactl", "unload-module", "module-combine-sink")
+
+	// Load module-combine-sink with comma-separated slaves
+	slaves := strings.Join(cleanSinks, ",")
+	out, err := a.runner.CombinedOutput(ctx, "pactl", "load-module", "module-combine-sink", "sink_name=combined", "slaves="+slaves, "sink_properties=device.description=Combined_Output")
+	if err != nil {
+		return fmt.Errorf("load combine-sink: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+
+	// Set combined as default and move all active streams
+	if err := a.SetDefaultSink(ctx, "combined"); err != nil {
+		return err
+	}
+
+	a.mu.Lock()
+	a.activeSinks = cleanSinks
+	a.mu.Unlock()
+	return nil
 }
 
 // SetDefaultSink changes the system-wide default audio output sink and immediately moves all active streams.
@@ -375,12 +453,29 @@ func (a *Audio) handleSetSink(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	if err := a.SetDefaultSink(ctx, req.Sink); err != nil {
+	if err := a.SetSinks(ctx, []string{req.Sink}); err != nil {
 		a.log.Error("set default sink", "sink", req.Sink, "err", err)
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "sink": req.Sink})
+}
+
+func (a *Audio) handleSetSinks(w http.ResponseWriter, r *http.Request) {
+	var req SetSinksRequest
+	if !httpx.DecodeJSON(w, r, &req) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if err := a.SetSinks(ctx, req.Sinks); err != nil {
+		a.log.Error("set sinks", "sinks", req.Sinks, "err", err)
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok", "sinks": req.Sinks})
 }
 
 func (a *Audio) handleSetVolume(w http.ResponseWriter, r *http.Request) {

@@ -365,9 +365,45 @@ func (h *Hardware) ScanBluetooth(ctx context.Context) ([]BluetoothDevice, error)
 }
 
 var macRegex = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 func isValidMAC(mac string) bool {
 	return macRegex.MatchString(strings.TrimSpace(mac))
+}
+
+func cleanBluetoothOutput(s string) string {
+	s = ansiRe.ReplaceAllString(s, "")
+	var lines []string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "Unable to open mgmt_socket") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, " ")
+}
+
+func (h *Hardware) isConnected(ctx context.Context, mac string) bool {
+	out, err := h.runner.CombinedOutput(ctx, "bluetoothctl", "info", mac)
+	if err != nil {
+		return false
+	}
+	var dev BluetoothDevice
+	dev.MAC = mac
+	ParseDeviceInfo(out, &dev)
+	return dev.Connected
+}
+
+func (h *Hardware) isPaired(ctx context.Context, mac string) bool {
+	out, err := h.runner.CombinedOutput(ctx, "bluetoothctl", "info", mac)
+	if err != nil {
+		return false
+	}
+	var dev BluetoothDevice
+	dev.MAC = mac
+	ParseDeviceInfo(out, &dev)
+	return dev.Paired
 }
 
 // ConnectBluetooth connects to a Bluetooth device.
@@ -379,27 +415,48 @@ func (h *Hardware) ConnectBluetooth(ctx context.Context, mac string) error {
 	_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "pairable", "on")
 	_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "trust", mac)
 	out, err := h.runner.CombinedOutput(ctx, "bluetoothctl", "connect", mac)
-	if err != nil {
-		outStr := strings.TrimSpace(string(out))
-		if strings.Contains(outStr, "br-connection-profile-unavailable") || strings.Contains(outStr, "Protocol not available") {
-			// If not paired yet, attempt pair first then connect
-			pairOut, pairErr := h.runner.CombinedOutput(ctx, "bluetoothctl", "pair", mac)
-			if pairErr == nil {
-				connOut, connErr := h.runner.CombinedOutput(ctx, "bluetoothctl", "connect", mac)
-				if connErr == nil {
-					return nil
-				}
-				outStr = strings.TrimSpace(string(connOut))
-			} else {
-				outStr = strings.TrimSpace(string(pairOut))
-			}
-			if strings.Contains(outStr, "br-connection-profile-unavailable") || strings.Contains(outStr, "Protocol not available") {
-				return fmt.Errorf("bluetooth audio profile unavailable: ensure pulseaudio-module-bluetooth or libspa-0.2-bluetooth is running on the host")
-			}
-		}
-		return fmt.Errorf("connect %s: %w (%s)", mac, err, outStr)
+	if err == nil {
+		return nil
 	}
-	return nil
+
+	outStr := cleanBluetoothOutput(string(out))
+
+	// BlueZ often reports br-connection-profile-unavailable during concurrent service discovery,
+	// even though the connection actually completes in the background. Check after a short settle time.
+	time.Sleep(600 * time.Millisecond)
+	if h.isConnected(ctx, mac) {
+		return nil
+	}
+
+	if strings.Contains(outStr, "br-connection-profile-unavailable") || strings.Contains(outStr, "Protocol not available") {
+		// If not paired yet, pair first
+		if !h.isPaired(ctx, mac) {
+			_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "pair", mac)
+			_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "trust", mac)
+		} else {
+			// If already paired, cycling disconnect clears stale BlueZ AVDTP transport channels
+			_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "disconnect", mac)
+			time.Sleep(600 * time.Millisecond)
+		}
+
+		// Ensure PulseAudio's bluetooth discovery module is active
+		_, _ = h.runner.CombinedOutput(ctx, "pactl", "load-module", "module-bluetooth-discover")
+
+		connOut, connErr := h.runner.CombinedOutput(ctx, "bluetoothctl", "connect", mac)
+		if connErr == nil {
+			return nil
+		}
+		time.Sleep(600 * time.Millisecond)
+		if h.isConnected(ctx, mac) {
+			return nil
+		}
+		retryStr := cleanBluetoothOutput(string(connOut))
+		if retryStr != "" {
+			outStr = retryStr
+		}
+	}
+
+	return fmt.Errorf("connect %s failed: %s", mac, outStr)
 }
 
 // DisconnectBluetooth disconnects an active Bluetooth connection.
@@ -410,7 +467,7 @@ func (h *Hardware) DisconnectBluetooth(ctx context.Context, mac string) error {
 	}
 	out, err := h.runner.CombinedOutput(ctx, "bluetoothctl", "disconnect", mac)
 	if err != nil {
-		return fmt.Errorf("disconnect %s: %w (%s)", mac, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("disconnect %s failed: %s", mac, cleanBluetoothOutput(string(out)))
 	}
 	return nil
 }
@@ -423,11 +480,13 @@ func (h *Hardware) PairBluetooth(ctx context.Context, mac string) error {
 	}
 	out, err := h.runner.CombinedOutput(ctx, "bluetoothctl", "pair", mac)
 	if err != nil {
-		return fmt.Errorf("pair %s: %w (%s)", mac, err, strings.TrimSpace(string(out)))
+		outStr := cleanBluetoothOutput(string(out))
+		if !strings.Contains(outStr, "AlreadyExists") {
+			return fmt.Errorf("pair %s failed: %s", mac, outStr)
+		}
 	}
 	_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "trust", mac)
-	_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "connect", mac)
-	return nil
+	return h.ConnectBluetooth(ctx, mac)
 }
 
 // RemoveBluetooth unpairs and removes a Bluetooth device.

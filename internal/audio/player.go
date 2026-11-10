@@ -344,3 +344,4 @@ func (p *Player) Close() {
 	}
 	_ = os.Remove(p.socketPath)
 }
+

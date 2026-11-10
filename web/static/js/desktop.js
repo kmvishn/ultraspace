@@ -9,6 +9,7 @@ import { startEvents, stopEvents, togglePanel } from './clipboard.js';
 import { startChatbot, stopChatbot } from './chatbot.js';
 import { webTarget } from './apps/browser.js';
 import { initLockScreen, lockDesktop } from './lockscreen.js';
+import { openAudioOutputsPopover } from './audio-target.js';
 
 export const WALLPAPERS = [
   { id: 'aurora', name: 'Aurora' },
@@ -151,66 +152,10 @@ function menuBar(user, onSignOut) {
   }, icon(iconName, 14), val);
 
   const soundBtn = h('button', {
-    class: 'mb-item', 'aria-label': 'Sound', title: 'Sound & Audio',
-    onclick: async (e) => {
+    class: 'mb-item mb-sound-btn', 'aria-label': 'Sound', title: 'Audio Output Devices',
+    onclick: (e) => {
       e.stopPropagation();
-      const r = soundBtn.getBoundingClientRect();
-      const currentTarget = localStorage.getItem('us.audio_target') || 'browser';
-      let st = null;
-      try { st = await api('GET', '/api/audio/status'); } catch {}
-
-      const items = [
-        { label: 'Audio Playback Target', disabled: true },
-        {
-          label: 'This Device (Browser)',
-          icon: 'laptop',
-          hint: currentTarget === 'browser' ? '✓ Active' : '',
-          action: () => {
-            localStorage.setItem('us.audio_target', 'browser');
-            emit('audio-target-changed', { target: 'browser' });
-            toast('Audio output switched to this browser');
-          },
-        },
-      ];
-
-      if (st?.available && st.sinks?.length) {
-        items.push('-');
-        items.push({ label: 'Server Audio Hardware', disabled: true });
-        for (const s of st.sinks) {
-          let ic = 'volume';
-          if (s.type === 'bluetooth') ic = 'bluetooth';
-          else if (s.type === 'hdmi') ic = 'tv';
-          else if (s.type === 'usb') ic = 'sliders';
-
-          const isThisActive = (currentTarget === 'server' && s.active);
-          items.push({
-            label: s.description || s.name,
-            icon: ic,
-            hint: isThisActive ? '✓ Active' : (s.active ? '(Default Server Sink)' : ''),
-            action: async () => {
-              try {
-                if (!s.active) {
-                  await api('POST', '/api/audio/sink', { sink: s.name });
-                }
-                localStorage.setItem('us.audio_target', 'server');
-                emit('audio-target-changed', { target: 'server', sink: s.name });
-                toast(`Switched audio to ${s.description || s.name}`);
-              } catch (err) {
-                report(err);
-              }
-            },
-          });
-        }
-      }
-
-      items.push('-');
-      items.push({
-        label: 'Sound & Audio Settings…',
-        icon: 'sliders',
-        action: () => openApp('settings', { section: 'sound' }),
-      });
-
-      menu(r.left, r.bottom + 6, items);
+      openAudioOutputsPopover(soundBtn);
     },
   }, icon('volume', 15));
   const wifiBtn = h('button', { class: 'mb-item', 'aria-label': 'Network', title: 'Network & Wi-Fi', onclick: () => openApp('settings', { section: 'network' }) }, icon('wifi', 15));

@@ -1,4 +1,5 @@
 import { h, icon, api, toast, report, confirmDialog, dialog, settings, system, on, fmtBytes, fmtDuration, fmtAgo, fmtDate, baseOf, fileUrl, emit } from '../core.js';
+import { getAudioOutputs, toggleBrowserOutput, toggleServerSink } from '../audio-target.js';
 import { deviceName } from '../session.js';
 import { patternPad } from '../pattern.js';
 import { chatbotConfigChanged } from '../chatbot.js';
@@ -80,51 +81,124 @@ function mountSettings(win, args) {
   }
 
   function sound(el) {
-    const sinkList = h('div', { class: 'device-list' }, h('div', { class: 'empty-state small' }, 'Checking audio devices…'));
+    const outputsContainer = h('div', { class: 'device-list', style: { display: 'flex', flexDirection: 'column', gap: '8px' } }, h('div', { class: 'empty-state small' }, 'Checking audio devices…'));
     const volSlider = h('input', { type: 'range', min: '0', max: '100', value: '100', class: 'slider', style: { flex: '1', accentColor: 'var(--accent)' } });
     const volNum = h('span', { class: 'card-big', style: { minWidth: '48px', textAlign: 'right' } }, '100%');
     const muteBtn = h('button', { class: 'btn small' }, icon('volume', 14), 'Mute');
-    const testBtn = h('button', { class: 'btn small primary' }, icon('play', 14), 'Play Test Sound');
+    const testBtn = h('button', { class: 'btn small primary' }, icon('play', 14), 'Play Test Chime');
     let timer = null;
     let isUpdating = false;
+    let cachedStatus = null;
 
-    let currentTarget = localStorage.getItem('us.audio_target') || 'browser';
-    const btnBrowser = h('button', {
-      class: `seg-btn text ${currentTarget === 'browser' ? 'active' : ''}`,
-      style: { flex: '1', padding: '10px' },
-      onclick: () => setTarget('browser'),
-    }, icon('laptop', 16), ' This Device (Browser)');
+    function renderOutputs() {
+      const outputs = getAudioOutputs();
+      const st = cachedStatus;
+      const items = [];
 
-    const btnServer = h('button', {
-      class: `seg-btn text ${currentTarget === 'server' ? 'active' : ''}`,
-      style: { flex: '1', padding: '10px' },
-      onclick: () => setTarget('server'),
-    }, icon('volume2', 16), ' Server Audio Hardware');
+      // 1. This Device (Browser)
+      const isBrowserOn = !!outputs.browser;
+      const browserCard = h('div', {
+        class: `device ${isBrowserOn ? 'current' : ''}`,
+        style: { cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px' },
+        onclick: async () => {
+          await toggleBrowserOutput();
+          renderOutputs();
+        },
+      },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },
+          h('span', { class: 'device-icon' }, icon('laptop', 20)),
+          h('div', { class: 'device-text' },
+            h('div', { class: 'device-name' }, 'This Device (Web Browser)', h('span', { class: `pill ${isBrowserOn ? 'active' : ''}` }, isBrowserOn ? 'Active' : 'Disabled')),
+            h('div', { class: 'set-desc' }, 'Plays music and media audio directly in your browser on this client device.'))
+        ),
+        h('label', { class: 'toggle', onclick: (e) => e.stopPropagation() },
+          h('input', {
+            type: 'checkbox',
+            checked: isBrowserOn,
+            onchange: async () => {
+              await toggleBrowserOutput();
+              renderOutputs();
+            },
+          }),
+          h('span', { class: 'slider' }))
+      );
+      items.push(browserCard);
 
-    const targetSeg = h('div', { class: 'seg big', style: { width: '100%', marginBottom: '12px' } }, btnBrowser, btnServer);
+      // 2. Server Audio Hardware Sinks
+      if (!st || !st.available) {
+        items.push(h('div', { class: 'device', style: { opacity: '0.7', padding: '12px 14px' } },
+          h('span', { class: 'device-icon' }, icon('volumeX', 20)),
+          h('div', { class: 'device-text' },
+            h('div', { class: 'device-name' }, 'Server hardware audio unavailable'),
+            h('div', { class: 'set-desc' }, 'PulseAudio / PipeWire is not active on this host.'))
+        ));
+      } else if (!st.sinks || st.sinks.length === 0) {
+        items.push(h('div', { class: 'empty-state small' }, 'No server output devices detected. Connect a speaker, Bluetooth device, or HDMI display.'));
+      } else {
+        st.sinks.forEach((s) => {
+          let sIcon = 'volume';
+          let sTypeBadge = 'Speaker / Jack';
+          if (s.type === 'hdmi') {
+            sIcon = 'tv';
+            sTypeBadge = 'HDMI / DisplayPort';
+          } else if (s.type === 'bluetooth') {
+            sIcon = 'bluetooth';
+            sTypeBadge = 'Bluetooth Speaker';
+          } else if (s.type === 'usb') {
+            sIcon = 'sliders';
+            sTypeBadge = 'USB Audio';
+          } else if (s.type === 'virtual') {
+            sIcon = 'monitor';
+            sTypeBadge = 'Virtual Sink';
+          }
 
-    function setTarget(t) {
-      currentTarget = t;
-      localStorage.setItem('us.audio_target', t);
-      btnBrowser.classList.toggle('active', t === 'browser');
-      btnServer.classList.toggle('active', t === 'server');
-      emit('audio-target-changed', { target: t });
-      toast(t === 'server' ? 'Audio playback destination set to server hardware' : 'Audio playback destination set to this browser');
+          const isSinkOn = outputs.serverSinks.includes(s.name);
+          const card = h('div', {
+            class: `device ${isSinkOn ? 'current' : ''}`,
+            style: { cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px' },
+            onclick: async () => {
+              await toggleServerSink(s.name);
+              await loadStatus();
+            },
+          },
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },
+              h('span', { class: 'device-icon' }, icon(sIcon, 20)),
+              h('div', { class: 'device-text' },
+                h('div', { class: 'device-name' },
+                  s.description || s.name,
+                  h('span', { class: 'pill' }, sTypeBadge),
+                  isSinkOn ? h('span', { class: 'pill active', style: { marginLeft: '4px' } }, 'Active') : null
+                ),
+                h('div', { class: 'set-desc' }, `${s.volume}% volume · ${s.mute ? 'Muted' : 'Unmuted'} · ${s.name}`))
+            ),
+            h('label', { class: 'toggle', onclick: (e) => e.stopPropagation() },
+              h('input', {
+                type: 'checkbox',
+                checked: isSinkOn,
+                onchange: async () => {
+                  await toggleServerSink(s.name);
+                  await loadStatus();
+                },
+              }),
+              h('span', { class: 'slider' }))
+          );
+          items.push(card);
+        });
+      }
+
+      outputsContainer.replaceChildren(...items);
     }
 
     async function loadStatus() {
       if (isUpdating) return;
       try {
         const st = await api('GET', '/api/audio/status');
+        cachedStatus = st;
         if (!st.available) {
-          sinkList.replaceChildren(h('div', { class: 'device' },
-            h('span', { class: 'device-icon' }, icon('volumeX', 20)),
-            h('div', { class: 'device-text' },
-              h('div', { class: 'device-name' }, 'Audio subsystem not available'),
-              h('div', { class: 'set-desc' }, 'PulseAudio or PipeWire (pactl) is not active on this host.'))));
           volSlider.disabled = true;
           muteBtn.disabled = true;
           testBtn.disabled = true;
+          renderOutputs();
           return;
         }
 
@@ -137,50 +211,7 @@ function mountSettings(win, args) {
         muteBtn.replaceChildren(icon(st.mute ? 'volumeX' : 'volume', 14), st.mute ? 'Unmute' : 'Mute');
         if (st.mute) muteBtn.classList.add('warn'); else muteBtn.classList.remove('warn');
 
-        if (!st.sinks || st.sinks.length === 0) {
-          sinkList.replaceChildren(h('div', { class: 'empty-state small' }, 'No audio output sinks detected.'));
-          return;
-        }
-
-        sinkList.replaceChildren(...st.sinks.map((s) => {
-          let sIcon = 'volume';
-          let sTypeBadge = 'Speaker / Jack';
-          if (s.type === 'hdmi') {
-            sIcon = 'tv';
-            sTypeBadge = 'HDMI / DisplayPort';
-          } else if (s.type === 'bluetooth') {
-            sIcon = 'music';
-            sTypeBadge = 'Bluetooth';
-          } else if (s.type === 'usb') {
-            sIcon = 'sliders';
-            sTypeBadge = 'USB Audio';
-          } else if (s.type === 'virtual') {
-            sIcon = 'monitor';
-            sTypeBadge = 'Virtual Sink';
-          }
-
-          const actionBtn = s.active
-            ? h('span', { class: 'pill active' }, 'Active Output')
-            : h('button', { class: 'btn small', onclick: () => selectSink(s) }, 'Select');
-
-          return h('div', { class: `device ${s.active ? 'current' : ''}` },
-            h('span', { class: 'device-icon' }, icon(sIcon, 18)),
-            h('div', { class: 'device-text' },
-              h('div', { class: 'device-name' }, s.description || s.name, h('span', { class: 'pill' }, sTypeBadge)),
-              h('div', { class: 'set-desc' }, `${s.volume}% volume · ${s.mute ? 'Muted' : 'Unmuted'} · ${s.name}`)),
-            actionBtn);
-        }));
-      } catch (err) {
-        report(err);
-      }
-    }
-
-    async function selectSink(s) {
-      try {
-        await api('POST', '/api/audio/sink', { sink: s.name });
-        setTarget('server');
-        toast(`Audio output switched to ${s.description || s.name}`);
-        await loadStatus();
+        renderOutputs();
       } catch (err) {
         report(err);
       }
@@ -235,13 +266,16 @@ function mountSettings(win, args) {
       h('div', { class: 'hero-actions' }, muteBtn, testBtn));
 
     el.replaceChildren(h('div', { class: 'settings-page' },
-      group('Audio Playback Destination', 'Choose whether Ultraspace routes media audio to this client browser or through the server hardware.', targetSeg),
-      group('Server Master Volume & Controls', 'Controls physical output volume on the server host.', volRow),
-      group('Server Audio Output Devices', 'Choose which physical speaker, headphone jack, HDMI, or Bluetooth sink on the server to output sound through.', sinkList)));
+      group('Active Audio Outputs (Multi-Device Routing)', 'Select any combination of output devices below. Music and audio can play through your browser, server speakers, or both simultaneously.', outputsContainer),
+      group('Server Master Volume & Controls', 'Controls physical output volume on the server host.', volRow)));
 
     loadStatus();
+    const offOutputs = on('audio-outputs-changed', renderOutputs);
     timer = setInterval(loadStatus, 15_000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      offOutputs?.();
+    };
   }
 
   function network(el) {

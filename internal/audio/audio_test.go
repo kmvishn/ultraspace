@@ -377,3 +377,49 @@ func TestSinkInputMigration(t *testing.T) {
 	}
 }
 
+func TestSetMultipleSinksCombined(t *testing.T) {
+	var loadedModule string
+	var defaultSink string
+	var mu sync.Mutex
+
+	runner := &mockRunner{
+		handlers: map[string]func(args []string) ([]byte, error){
+			"unload-module": func(args []string) ([]byte, error) {
+				return []byte(""), nil
+			},
+			"load-module module-combine-sink": func(args []string) ([]byte, error) {
+				mu.Lock()
+				loadedModule = strings.Join(args, " ")
+				mu.Unlock()
+				return []byte("42\n"), nil
+			},
+			"set-default-sink": func(args []string) ([]byte, error) {
+				mu.Lock()
+				if len(args) > 0 {
+					defaultSink = args[len(args)-1]
+				}
+				mu.Unlock()
+				return []byte(""), nil
+			},
+			"sink-inputs short": func(args []string) ([]byte, error) {
+				return []byte(""), nil
+			},
+		},
+	}
+
+	audioSvc := NewWithRunner(slog.Default(), runner)
+	sinks := []string{"bluez_sink.1", "alsa_output.speaker"}
+	if err := audioSvc.SetSinks(context.Background(), sinks); err != nil {
+		t.Fatalf("SetSinks err: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(loadedModule, "slaves=bluez_sink.1,alsa_output.speaker") {
+		t.Errorf("loadedModule = %q, want slaves=bluez_sink.1,alsa_output.speaker", loadedModule)
+	}
+	if defaultSink != "combined" {
+		t.Errorf("defaultSink = %q, want combined", defaultSink)
+	}
+}
+
