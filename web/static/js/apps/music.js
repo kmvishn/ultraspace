@@ -1034,6 +1034,13 @@ function mountMusic(win, args) {
   const offOutputs = on('audio-outputs-changed', (outputs) => {
     syncPlaybackOutputs(outputs);
   });
+  const offClientVol = on('client-volume-changed', ({ volume }) => {
+    audio.volume = volume;
+    audio.muted = (volume === 0);
+    vol.value = String(Math.round(volume * 100));
+    vol.style.setProperty('--fill', `${vol.value}%`);
+    updateVol();
+  });
   win.body.addEventListener('keydown', (e) => {
     if (e.target.closest('input, textarea')) return;
     if (e.key === ' ') { e.preventDefault(); toggle(); }
@@ -1161,6 +1168,7 @@ function mountMusic(win, args) {
     },
     onDestroy() {
       if (typeof offOutputs === 'function') offOutputs();
+      if (typeof offClientVol === 'function') offClientVol();
       stopServerPoll();
       if (serverPlaying) {
         api('POST', '/api/audio/player/stop').catch(() => {});

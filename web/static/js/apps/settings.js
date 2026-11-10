@@ -97,30 +97,59 @@ function mountSettings(win, args) {
 
       // 1. This Device (Browser)
       const isBrowserOn = !!outputs.browser;
+      const browserVolVal = Math.round(parseFloat(localStorage.getItem('us.volume') || '1') * 100);
+      const browserVolNum = h('span', { class: 'card-big', style: { minWidth: '44px', textAlign: 'right', fontSize: '13px' } }, `${browserVolVal}%`);
+      const browserMuteIcon = icon(browserVolVal === 0 ? 'volumeX' : 'volume', 15);
+      const browserSlider = h('input', {
+        type: 'range', min: '0', max: '100', value: String(browserVolVal), class: 'slider',
+        style: { flex: '1', accentColor: 'var(--accent)' },
+        oninput: () => {
+          browserVolNum.textContent = `${browserSlider.value}%`;
+          browserSlider.style.setProperty('--fill', `${browserSlider.value}%`);
+          const v = parseInt(browserSlider.value, 10) / 100;
+          try { localStorage.setItem('us.volume', String(v)); } catch {}
+          emit('client-volume-changed', { volume: v });
+          browserMuteIcon.replaceChildren(icon(v === 0 ? 'volumeX' : 'volume', 15));
+        },
+      });
+      browserSlider.style.setProperty('--fill', `${browserVolVal}%`);
+
       const browserCard = h('div', {
         class: `device ${isBrowserOn ? 'current' : ''}`,
-        style: { cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px' },
-        onclick: async () => {
-          await toggleBrowserOutput();
-          renderOutputs();
-        },
+        style: { display: 'flex', flexDirection: 'column', padding: '12px 14px', gap: '10px' },
       },
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },
-          h('span', { class: 'device-icon' }, icon('laptop', 20)),
-          h('div', { class: 'device-text' },
-            h('div', { class: 'device-name' }, 'This Device (Web Browser)', h('span', { class: `pill ${isBrowserOn ? 'active' : ''}` }, isBrowserOn ? 'Active' : 'Disabled')),
-            h('div', { class: 'set-desc' }, 'Plays music and media audio directly in your browser on this client device.'))
+        h('div', {
+          style: { cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' },
+          onclick: async () => {
+            await toggleBrowserOutput();
+            renderOutputs();
+          },
+        },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },
+            h('span', { class: 'device-icon' }, icon('laptop', 20)),
+            h('div', { class: 'device-text' },
+              h('div', { class: 'device-name' }, 'This Device (Web Browser)', h('span', { class: `pill ${isBrowserOn ? 'active' : ''}` }, isBrowserOn ? 'Active' : 'Disabled')),
+              h('div', { class: 'set-desc' }, 'Plays music and media audio directly in your browser on this client device.'))
+          ),
+          h('label', { class: 'toggle', onclick: (e) => e.stopPropagation() },
+            h('input', {
+              type: 'checkbox',
+              checked: isBrowserOn,
+              onchange: async () => {
+                await toggleBrowserOutput();
+                renderOutputs();
+              },
+            }),
+            h('span', { class: 'slider' }))
         ),
-        h('label', { class: 'toggle', onclick: (e) => e.stopPropagation() },
-          h('input', {
-            type: 'checkbox',
-            checked: isBrowserOn,
-            onchange: async () => {
-              await toggleBrowserOutput();
-              renderOutputs();
-            },
-          }),
-          h('span', { class: 'slider' }))
+        h('div', {
+          style: { display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '8px', borderTop: '1px solid var(--border)', width: '100%' },
+          onclick: (e) => e.stopPropagation(),
+        },
+          browserMuteIcon,
+          browserSlider,
+          browserVolNum
+        )
       );
       items.push(browserCard);
 
@@ -153,34 +182,82 @@ function mountSettings(win, args) {
           }
 
           const isSinkOn = outputs.serverSinks.includes(s.name);
+          const sVolNum = h('span', { class: 'card-big', style: { minWidth: '44px', textAlign: 'right', fontSize: '13px' } }, `${s.volume}%`);
+          const sMuteBtn = h('button', {
+            class: `icon-btn small ${s.mute ? 'warn' : ''}`,
+            title: s.mute ? 'Unmute' : 'Mute',
+            onclick: async (e) => {
+              e.stopPropagation();
+              try {
+                await api('POST', '/api/audio/mute', { sink: s.name, mute: !s.mute });
+                s.mute = !s.mute;
+                sMuteBtn.replaceChildren(icon(s.mute ? 'volumeX' : 'volume', 15));
+                sMuteBtn.classList.toggle('warn', s.mute);
+              } catch (err) {
+                report(err);
+              }
+            },
+          }, icon(s.mute ? 'volumeX' : 'volume', 15));
+
+          const sSlider = h('input', {
+            type: 'range', min: '0', max: '100', value: String(s.volume), class: 'slider',
+            style: { flex: '1', accentColor: 'var(--accent)' },
+            oninput: () => {
+              sVolNum.textContent = `${sSlider.value}%`;
+              sSlider.style.setProperty('--fill', `${sSlider.value}%`);
+            },
+            onchange: async () => {
+              try {
+                const vol = parseInt(sSlider.value, 10);
+                await api('POST', '/api/audio/volume', { sink: s.name, volume: vol });
+                s.volume = vol;
+              } catch (err) {
+                report(err);
+              }
+            },
+          });
+          sSlider.style.setProperty('--fill', `${s.volume}%`);
+
           const card = h('div', {
             class: `device ${isSinkOn ? 'current' : ''}`,
-            style: { cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px' },
-            onclick: async () => {
-              await toggleServerSink(s.name);
-              await loadStatus();
-            },
+            style: { display: 'flex', flexDirection: 'column', padding: '12px 14px', gap: '10px' },
           },
-            h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },
-              h('span', { class: 'device-icon' }, icon(sIcon, 20)),
-              h('div', { class: 'device-text' },
-                h('div', { class: 'device-name' },
-                  s.description || s.name,
-                  h('span', { class: 'pill' }, sTypeBadge),
-                  isSinkOn ? h('span', { class: 'pill active', style: { marginLeft: '4px' } }, 'Active') : null
-                ),
-                h('div', { class: 'set-desc' }, `${s.volume}% volume · ${s.mute ? 'Muted' : 'Unmuted'} · ${s.name}`))
+            h('div', {
+              style: { cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' },
+              onclick: async () => {
+                await toggleServerSink(s.name);
+                await loadStatus();
+              },
+            },
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },
+                h('span', { class: 'device-icon' }, icon(sIcon, 20)),
+                h('div', { class: 'device-text' },
+                  h('div', { class: 'device-name' },
+                    s.description || s.name,
+                    h('span', { class: 'pill' }, sTypeBadge),
+                    isSinkOn ? h('span', { class: 'pill active', style: { marginLeft: '4px' } }, 'Active') : null
+                  ),
+                  h('div', { class: 'set-desc' }, s.name))
+              ),
+              h('label', { class: 'toggle', onclick: (e) => e.stopPropagation() },
+                h('input', {
+                  type: 'checkbox',
+                  checked: isSinkOn,
+                  onchange: async () => {
+                    await toggleServerSink(s.name);
+                    await loadStatus();
+                  },
+                }),
+                h('span', { class: 'slider' }))
             ),
-            h('label', { class: 'toggle', onclick: (e) => e.stopPropagation() },
-              h('input', {
-                type: 'checkbox',
-                checked: isSinkOn,
-                onchange: async () => {
-                  await toggleServerSink(s.name);
-                  await loadStatus();
-                },
-              }),
-              h('span', { class: 'slider' }))
+            h('div', {
+              style: { display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '8px', borderTop: '1px solid var(--border)', width: '100%' },
+              onclick: (e) => e.stopPropagation(),
+            },
+              sMuteBtn,
+              sSlider,
+              sVolNum
+            )
           );
           items.push(card);
         });
@@ -266,8 +343,8 @@ function mountSettings(win, args) {
       h('div', { class: 'hero-actions' }, muteBtn, testBtn));
 
     el.replaceChildren(h('div', { class: 'settings-page' },
-      group('Active Audio Outputs (Multi-Device Routing)', 'Select any combination of output devices below. Music and audio can play through your browser, server speakers, or both simultaneously.', outputsContainer),
-      group('Server Master Volume & Controls', 'Controls physical output volume on the server host.', volRow)));
+      group('Audio Outputs & Dedicated Device Volumes', 'Select any combination of output devices and adjust their individual volume levels independently.', outputsContainer),
+      group('Master Server Volume & Output Test', 'Controls the overall master mix level and tests hardware output on the server host.', volRow)));
 
     loadStatus();
     const offOutputs = on('audio-outputs-changed', renderOutputs);
