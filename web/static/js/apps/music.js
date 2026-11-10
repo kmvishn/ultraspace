@@ -587,12 +587,10 @@ function mountMusic(win, args) {
       }
     } else {
       stopServerPoll();
-      if (serverPlaying) {
-        api('POST', '/api/audio/player/stop').catch(() => {});
-        serverPlaying = false;
-        serverPaused = false;
-        serverHasStarted = false;
-      }
+      api('POST', '/api/audio/player/stop').catch(() => {});
+      serverPlaying = false;
+      serverPaused = false;
+      serverHasStarted = false;
     }
 
     // Sync Browser
@@ -753,12 +751,10 @@ function mountMusic(win, args) {
       }
     } else {
       stopServerPoll();
-      if (serverPlaying) {
-        api('POST', '/api/audio/player/stop').catch(() => {});
-        serverPlaying = false;
-        serverPaused = false;
-        serverHasStarted = false;
-      }
+      api('POST', '/api/audio/player/stop').catch(() => {});
+      serverPlaying = false;
+      serverPaused = false;
+      serverHasStarted = false;
     }
 
     if (hasBrowser) {

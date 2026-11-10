@@ -57,6 +57,7 @@ type Player struct {
 	status         PlayerStatus
 	streamResolver StreamResolver
 	lastPlayTime   time.Time
+	audioDevice    string
 }
 
 // NewPlayer creates a new server Player.
@@ -67,6 +68,23 @@ func NewPlayer(log *slog.Logger, filesRoot string) *Player {
 		filesRoot:  filesRoot,
 		socketPath: sock,
 	}
+}
+
+// SetAudioDevice sets the audio output device (pulse/<sink_name>) for mpv.
+func (p *Player) SetAudioDevice(sinkName string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	target := "pulse"
+	if sinkName != "" {
+		target = "pulse/" + sinkName
+	}
+	p.audioDevice = target
+	if p.cmd == nil || !p.ping() {
+		return nil
+	}
+	_, err := p.sendCommand("set_property", "audio-device", target)
+	return err
 }
 
 // SetStreamResolver assigns a resolver function for streaming providers like Navidrome.
@@ -105,6 +123,7 @@ func (p *Player) ensureRunning() error {
 		"--no-video",
 		"--idle=yes",
 		"--ao=pulse",
+		"--audio-client-name=ultraspace",
 		fmt.Sprintf("--input-ipc-server=%s", p.socketPath),
 	)
 	cmd.Env = os.Environ()
@@ -246,6 +265,10 @@ func (p *Player) Play(ctx context.Context, req PlayRequest, userID int64) error 
 	}
 
 	p.log.Info("player starting playback", "title", req.Title)
+
+	if p.audioDevice != "" {
+		_, _ = p.sendCommand("set_property", "audio-device", p.audioDevice)
+	}
 
 	if _, err := p.sendCommand("loadfile", target, "replace"); err != nil {
 		return fmt.Errorf("loadfile: %w", err)

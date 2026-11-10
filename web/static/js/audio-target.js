@@ -59,9 +59,7 @@ export async function toggleServerSink(sinkName) {
   }
 
   try {
-    if (current.serverSinks.length > 0) {
-      await api('POST', '/api/audio/sinks', { sinks: current.serverSinks });
-    }
+    await api('POST', '/api/audio/sinks', { sinks: current.serverSinks });
   } catch (err) {
     report(err);
   }
@@ -77,9 +75,7 @@ export async function setAllServerSinks(sinkNames) {
     current.browser = true;
   }
   try {
-    if (current.serverSinks.length > 0) {
-      await api('POST', '/api/audio/sinks', { sinks: current.serverSinks });
-    }
+    await api('POST', '/api/audio/sinks', { sinks: current.serverSinks });
   } catch (err) {
     report(err);
   }

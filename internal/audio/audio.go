@@ -346,7 +346,15 @@ func (a *Audio) SetSinks(ctx context.Context, sinks []string) error {
 	}
 
 	if len(cleanSinks) == 0 {
-		return errors.New("at least one valid sink required")
+		a.mu.Lock()
+		a.activeSinks = nil
+		a.mu.Unlock()
+		if a.player != nil {
+			_ = a.player.Stop(ctx)
+			_ = a.player.SetAudioDevice("")
+		}
+		a.unloadCombineSinks(ctx)
+		return nil
 	}
 
 	a.mu.Lock()
@@ -361,6 +369,13 @@ func (a *Audio) SetSinks(ctx context.Context, sinks []string) error {
 	}
 	a.mu.Unlock()
 	if same {
+		if a.player != nil {
+			if len(cleanSinks) == 1 {
+				_ = a.player.SetAudioDevice(cleanSinks[0])
+			} else {
+				_ = a.player.SetAudioDevice("combined")
+			}
+		}
 		return nil
 	}
 
@@ -371,6 +386,10 @@ func (a *Audio) SetSinks(ctx context.Context, sinks []string) error {
 		if err := a.SetDefaultSink(ctx, target); err != nil {
 			return err
 		}
+		if a.player != nil {
+			_ = a.player.SetAudioDevice(target)
+		}
+		a.moveSinkInputs(ctx, target)
 		a.unloadCombineSinks(ctx)
 
 		a.mu.Lock()
@@ -401,6 +420,10 @@ func (a *Audio) SetSinks(ctx context.Context, sinks []string) error {
 	if err := a.SetDefaultSink(ctx, "combined"); err != nil {
 		return err
 	}
+	if a.player != nil {
+		_ = a.player.SetAudioDevice("combined")
+	}
+	a.moveSinkInputs(ctx, "combined")
 
 	a.mu.Lock()
 	a.activeSinks = cleanSinks
@@ -603,6 +626,13 @@ func (a *Audio) handlePlayerPlay(w http.ResponseWriter, r *http.Request) {
 		if err := a.SetSinks(ctx, req.Sinks); err != nil {
 			a.log.Warn("player set sinks failed", "sinks", req.Sinks, "err", err)
 		}
+	} else {
+		// No server sinks enabled; ensure server player is stopped
+		if a.player != nil {
+			_ = a.player.Stop(ctx)
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
+		return
 	}
 
 	var userID int64
