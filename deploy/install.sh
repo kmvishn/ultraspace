@@ -191,13 +191,89 @@ install_browser() {
   echo "Server browser installed: Chrome $cv in $opt/chrome."
 }
 
+# ---- System Dependencies --------------------------------------------------
+
+install_dependencies() {
+  echo "Installing system dependencies (audio, bluetooth, media, hardware, network)..."
+  deps="ffmpeg mpv pulseaudio pulseaudio-utils pulseaudio-module-bluetooth bluez network-manager pciutils usbutils curl ca-certificates"
+  apt_install $deps || warn "some packages could not be installed; you may need to install them manually"
+
+  # Polkit rule for unprivileged NetworkManager control (Wi-Fi scan, connect, hotspot)
+  if [ -d /etc/polkit-1/rules.d ]; then
+    cat << 'EOF' > /etc/polkit-1/rules.d/50-ultraspace-network.rules
+// Allow ultraspace service to manage network and wifi without prompting for root
+polkit.addRule(function(action, subject) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") == 0 &&
+        (subject.user == "ultraspace" || subject.isInGroup("sudo") || subject.isInGroup("wheel"))) {
+        return polkit.Result.YES;
+    }
+});
+EOF
+  fi
+
+  # D-Bus permissions for system PulseAudio + BlueZ Bluetooth audio endpoints
+  if [ -d /etc/dbus-1/system.d ]; then
+    cat << 'EOF' > /etc/dbus-1/system.d/pulseaudio-system.conf
+<!DOCTYPE busconfig PUBLIC
+ "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <policy user="pulse">
+    <allow own="org.pulseaudio.Server"/>
+    <allow send_destination="org.bluez"/>
+    <allow send_interface="org.bluez.Manager"/>
+    <allow send_interface="org.bluez.MediaEndpoint1"/>
+    <allow send_interface="org.bluez.Profile1"/>
+  </policy>
+  <policy context="default">
+    <allow send_destination="org.pulseaudio.Server"/>
+    <allow receive_sender="org.pulseaudio.Server"/>
+  </policy>
+</busconfig>
+EOF
+  fi
+
+  # Enable Bluetooth audio modules in /etc/pulse/system.pa if present
+  if [ -f /etc/pulse/system.pa ]; then
+    if ! grep -q "module-bluetooth-discover" /etc/pulse/system.pa; then
+      printf '\n### Ultraspace Bluetooth & Audio Modules\nload-module module-bluetooth-policy\nload-module module-bluetooth-discover\n' >> /etc/pulse/system.pa
+    fi
+  fi
+
+  # System-wide PulseAudio service for headless server operation
+  if [ ! -f /etc/systemd/system/pulseaudio.service ]; then
+    cat << 'EOF' > /etc/systemd/system/pulseaudio.service
+[Unit]
+Description=PulseAudio Sound Server (System-wide)
+After=sound.target bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/pulseaudio --daemonize=no --system --disallow-exit --disallow-module-loading=no --log-target=journal
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now pulseaudio.service 2>/dev/null || true
+  fi
+
+  # Add pulse user to bluetooth and audio groups
+  if id pulse >/dev/null 2>&1; then
+    usermod -aG bluetooth,audio pulse 2>/dev/null || true
+  fi
+}
+
 install_media() {
-  echo "Installing ffmpeg, pulseaudio and bluetooth audio module..."
-  apt_install ffmpeg pulseaudio pulseaudio-module-bluetooth || return 1
-  echo "ffmpeg installed: the video player converts any format, and the server browser has sound."
+  install_dependencies
 }
 
 # ---- ultraspace itself ----------------------------------------------------
+
+install_dependencies
 
 install -m 755 "$bin" /usr/local/bin/ultraspace
 id ultraspace >/dev/null 2>&1 || useradd --system --home /var/lib/ultraspace --shell /usr/sbin/nologin ultraspace
@@ -261,10 +337,8 @@ fi
 # ---- start ----------------------------------------------------------------
 
 new_unit=0
-if [ ! -f /etc/systemd/system/ultraspace.service ]; then
-  install -m 644 "$deploy/ultraspace.service" /etc/systemd/system/ultraspace.service
-  new_unit=1
-fi
+[ -f /etc/systemd/system/ultraspace.service ] || new_unit=1
+install -m 644 "$deploy/ultraspace.service" /etc/systemd/system/ultraspace.service
 systemctl daemon-reload
 if [ "$new_unit" = 1 ]; then
   systemctl enable --now ultraspace
