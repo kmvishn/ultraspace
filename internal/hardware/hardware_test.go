@@ -24,7 +24,12 @@ func (m *mockRunner) CombinedOutput(ctx context.Context, name string, args ...st
 		fullCmd += " " + strings.Join(args, " ")
 	}
 	for pattern, handler := range m.handlers {
-		if strings.Contains(fullCmd, pattern) {
+		spacedCmd := " " + fullCmd + " "
+		spacedPattern := " " + pattern + " "
+		if strings.Contains(spacedCmd, spacedPattern) || strings.Contains(fullCmd, pattern) {
+			if pattern == "pair" && strings.Contains(fullCmd, "pairable") {
+				continue
+			}
 			return handler(args)
 		}
 	}
@@ -188,6 +193,7 @@ func TestBluetoothActions(t *testing.T) {
 	runner := &mockRunner{
 		handlers: map[string]func(args []string) ([]byte, error){
 			"power on":     record("power-on"),
+			"pairable":     func(args []string) ([]byte, error) { return []byte("ok"), nil },
 			"connect":      record("connect"),
 			"disconnect":   record("disconnect"),
 			"pair":         record("pair"),

@@ -192,8 +192,8 @@ install_browser() {
 }
 
 install_media() {
-  echo "Installing ffmpeg and pulseaudio..."
-  apt_install ffmpeg pulseaudio || return 1
+  echo "Installing ffmpeg, pulseaudio and bluetooth audio module..."
+  apt_install ffmpeg pulseaudio pulseaudio-module-bluetooth || return 1
   echo "ffmpeg installed: the video player converts any format, and the server browser has sound."
 }
 
@@ -201,6 +201,7 @@ install_media() {
 
 install -m 755 "$bin" /usr/local/bin/ultraspace
 id ultraspace >/dev/null 2>&1 || useradd --system --home /var/lib/ultraspace --shell /usr/sbin/nologin ultraspace
+usermod -aG bluetooth,audio,netdev,pulse-access ultraspace || true
 mkdir -p /etc/ultraspace
 
 fresh=0

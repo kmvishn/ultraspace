@@ -66,7 +66,14 @@ EOF
 echo "  -> Polkit rule configured."
 
 echo ""
-echo "[4/4] Checking battery charge threshold..."
+echo "[4/6] Configuring Bluetooth & Audio groups for Ultraspace..."
+if id ultraspace >/dev/null 2>&1; then
+    usermod -aG bluetooth,audio,netdev,pulse-access ultraspace || true
+    echo "  -> Added ultraspace to bluetooth, audio, netdev, pulse-access groups."
+fi
+
+echo ""
+echo "[5/6] Checking battery charge threshold..."
 FOUND_THRESHOLD=0
 for f in /sys/class/power_supply/BAT*/charge_control_end_threshold; do
     if [ -f "$f" ]; then

@@ -106,3 +106,4 @@ func (a *Auth) handleUnlock(w http.ResponseWriter, r *http.Request) {
 
 	httpx.Error(w, http.StatusBadRequest, "PIN or password required")
 }
+

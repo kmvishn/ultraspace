@@ -336,11 +336,15 @@ func (h *Hardware) SetBluetoothPower(ctx context.Context, powered bool) error {
 	if err != nil {
 		return fmt.Errorf("bluetooth power %s: %w (%s)", arg, err, strings.TrimSpace(string(out)))
 	}
+	if powered {
+		_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "pairable", "on")
+	}
 	return nil
 }
 
 // ScanBluetooth triggers a 5-second discovery scan for nearby Bluetooth devices.
 func (h *Hardware) ScanBluetooth(ctx context.Context) ([]BluetoothDevice, error) {
+	_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "pairable", "on")
 	// Trigger scan
 	_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "--timeout", "5", "scan", "on")
 
@@ -372,9 +376,28 @@ func (h *Hardware) ConnectBluetooth(ctx context.Context, mac string) error {
 	if !isValidMAC(mac) {
 		return errors.New("invalid MAC address format")
 	}
+	_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "pairable", "on")
+	_, _ = h.runner.CombinedOutput(ctx, "bluetoothctl", "trust", mac)
 	out, err := h.runner.CombinedOutput(ctx, "bluetoothctl", "connect", mac)
 	if err != nil {
-		return fmt.Errorf("connect %s: %w (%s)", mac, err, strings.TrimSpace(string(out)))
+		outStr := strings.TrimSpace(string(out))
+		if strings.Contains(outStr, "br-connection-profile-unavailable") || strings.Contains(outStr, "Protocol not available") {
+			// If not paired yet, attempt pair first then connect
+			pairOut, pairErr := h.runner.CombinedOutput(ctx, "bluetoothctl", "pair", mac)
+			if pairErr == nil {
+				connOut, connErr := h.runner.CombinedOutput(ctx, "bluetoothctl", "connect", mac)
+				if connErr == nil {
+					return nil
+				}
+				outStr = strings.TrimSpace(string(connOut))
+			} else {
+				outStr = strings.TrimSpace(string(pairOut))
+			}
+			if strings.Contains(outStr, "br-connection-profile-unavailable") || strings.Contains(outStr, "Protocol not available") {
+				return fmt.Errorf("bluetooth audio profile unavailable: ensure pulseaudio-module-bluetooth or libspa-0.2-bluetooth is running on the host")
+			}
+		}
+		return fmt.Errorf("connect %s: %w (%s)", mac, err, outStr)
 	}
 	return nil
 }

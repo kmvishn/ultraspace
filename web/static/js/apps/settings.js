@@ -695,7 +695,10 @@ function mountSettings(win, args) {
             btDevList.replaceChildren(...st.bluetooth_devices.map((d) => {
               const connectBtn = d.connected
                 ? h('button', { class: 'btn small', onclick: () => disconnectBT(d) }, 'Disconnect')
-                : h('button', { class: 'btn small primary', onclick: () => connectBT(d) }, 'Connect');
+                : h('button', { class: 'btn small primary', onclick: () => connectBT(d) }, d.paired ? 'Connect' : 'Pair & Connect');
+              const pairBtn = (!d.paired && !d.connected)
+                ? h('button', { class: 'btn small', onclick: () => pairBT(d) }, 'Pair')
+                : null;
               const removeBtn = h('button', { class: 'btn small', onclick: () => removeBT(d) }, icon('trash', 14));
 
               return h('div', { class: `device ${d.connected ? 'current' : ''}` },
@@ -703,7 +706,7 @@ function mountSettings(win, args) {
                 h('div', { class: 'device-text' },
                   h('div', { class: 'device-name' }, d.name || d.mac, d.connected ? h('span', { class: 'pill active' }, 'Connected') : d.paired ? h('span', { class: 'pill' }, 'Paired') : null),
                   h('div', { class: 'set-desc' }, `${d.mac} ${d.trusted ? '· Trusted' : ''}`)),
-                h('div', { class: 'hero-actions' }, connectBtn, removeBtn));
+                h('div', { class: 'hero-actions' }, pairBtn, connectBtn, removeBtn));
             }));
           } else {
             btDevList.replaceChildren(h('div', { class: 'empty-state small' }, st.bluetooth.powered ? 'No paired devices. Click “Scan” to discover nearby devices.' : 'Bluetooth is powered off.'));
@@ -758,8 +761,23 @@ function mountSettings(win, args) {
       }
     }
 
+    async function pairBT(d) {
+      try {
+        toast(`Pairing with ${d.name || d.mac}…`);
+        await api('POST', '/api/hardware/bluetooth/pair', { mac: d.mac });
+        toast(`Paired with ${d.name || d.mac}`);
+        await loadStatus();
+      } catch (err) {
+        report(err);
+      }
+    }
+
     async function connectBT(d) {
       try {
+        if (!d.paired) {
+          toast(`Pairing with ${d.name || d.mac}…`);
+          await api('POST', '/api/hardware/bluetooth/pair', { mac: d.mac }).catch(() => {});
+        }
         await api('POST', '/api/hardware/bluetooth/connect', { mac: d.mac });
         toast(`Connected to ${d.name || d.mac}`);
         await loadStatus();

@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 User=ultraspace
 Group=ultraspace
-# Read-only access to the system journal for the Logs and Services views.
-SupplementaryGroups=systemd-journal
+# Read-only access to system journal for Logs, plus audio/bluetooth/network access.
+SupplementaryGroups=systemd-journal pulse-access audio bluetooth netdev
 ExecStart=/usr/local/bin/ultraspace -config /etc/ultraspace/config.toml
 Restart=on-failure
 RestartSec=3
