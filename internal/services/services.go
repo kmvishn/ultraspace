@@ -27,6 +27,7 @@ func New(log *slog.Logger) *Services { return &Services{log: log} }
 func (s *Services) Register(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
 	mux.Handle("GET /api/services", auth(http.HandlerFunc(s.handleList)))
 	mux.Handle("GET /api/logs", auth(http.HandlerFunc(s.handleLogs)))
+	mux.Handle("GET /api/host/packages", auth(http.HandlerFunc(s.handlePackages)))
 }
 
 type Unit struct {

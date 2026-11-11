@@ -530,6 +530,9 @@ button.crumb:hover { background: var(--hover); color: var(--text); }
 /* ---------- Music ---------- */
 
 .app-music { display: grid; grid-template-columns: 210px 1fr; grid-template-rows: 1fr auto; }
+.folder-pick { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow: auto; margin-top: 8px; }
+.folder-picks { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.folder-picks .pill { display: inline-flex; align-items: center; gap: 2px; }
 .app-music .side { grid-row: 1; }
 .app-music .main { grid-row: 1; }
 .app-music .player { grid-column: 1 / -1; }

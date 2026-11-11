@@ -51,6 +51,8 @@ type HotspotManager struct {
 	cfg          HotspotConfig
 	active       bool
 	starting     bool
+	portal       portal
+	seen         []WiFiAccessPoint // networks seen before the radio became the setup hotspot
 	activeSSID   string
 	activeDev    string
 	offlineSince time.Time
@@ -162,6 +164,10 @@ func (h *HotspotManager) StartHotspot(ctx context.Context) error {
 		dev = d
 	}
 
+	// The radio usually cannot scan once it is the hotspot. Keep what it saw
+	// so the setup page can still list networks, and so a typed name can be joined.
+	h.rememberNetworks(ctx)
+
 	args := []string{"dev", "wifi", "hotspot", "ifname", dev, "ssid", h.cfg.SSID}
 	if h.cfg.Password != "" {
 		args = append(args, "password", h.cfg.Password)
@@ -179,11 +185,13 @@ func (h *HotspotManager) StartHotspot(ctx context.Context) error {
 	h.mu.Unlock()
 
 	h.net.log.Info("fallback setup hotspot activated", "ssid", h.cfg.SSID, "dev", dev)
+	h.ensurePortal(context.Background())
 	return nil
 }
 
 // StopHotspot deactivates any active hotspot.
 func (h *HotspotManager) StopHotspot(ctx context.Context) error {
+	h.portal.stop()
 	_, _ = h.net.runner.CombinedOutput(ctx, "nmcli", "con", "down", "Hotspot")
 	if h.cfg.SSID != "" {
 		_, _ = h.net.runner.CombinedOutput(ctx, "nmcli", "con", "down", h.cfg.SSID)
@@ -245,11 +253,12 @@ func (h *HotspotManager) checkStep(ctx context.Context) {
 	uplink := h.hasUplink(st)
 
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	if uplink {
 		h.offlineSince = time.Time{}
-		if h.active || h.starting {
+		stop := h.active || h.starting
+		h.mu.Unlock()
+		if stop {
 			go func() {
 				_ = h.StopHotspot(context.Background())
 			}()
@@ -259,12 +268,18 @@ func (h *HotspotManager) checkStep(ctx context.Context) {
 
 	// Hotspot is already up, or a start is in flight. Its own connection is not an uplink.
 	if h.active || h.starting {
+		active := h.active
+		h.mu.Unlock()
+		if active {
+			h.ensurePortal(ctx)
+		}
 		return
 	}
 
 	now := time.Now()
 	if h.offlineSince.IsZero() {
 		h.offlineSince = now
+		h.mu.Unlock()
 		return
 	}
 
@@ -281,6 +296,7 @@ func (h *HotspotManager) checkStep(ctx context.Context) {
 			}
 		}()
 	}
+	h.mu.Unlock()
 }
 
 // HTTP handlers for Hotspot

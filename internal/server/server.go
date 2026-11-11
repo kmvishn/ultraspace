@@ -177,6 +177,7 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 	mux.Handle("/", assets)
 
 	h := securityHeaders(csrf(cfg.PublicOrigin, proxy, logRequests(log, mux)))
+	net.PublishDesktop(h, cfg.Listen)
 	return h, cleanup, nil
 }
 

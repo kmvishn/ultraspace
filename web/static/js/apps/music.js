@@ -1,6 +1,6 @@
 // Music: plays audio from Files (folders become albums) and from a connected Navidrome
 // server, through one player. The queue and position follow you between devices.
-import { h, icon, api, report, toast, emit, on, menu, fmtClock, fmtBytes, fmtDuration, extOf, dirOf, baseOf, fileUrl, debounce, uploadWithProgress } from '../core.js';
+import { h, icon, api, report, toast, emit, on, menu, fmtClock, fmtBytes, fmtDuration, extOf, dirOf, baseOf, fileUrl, debounce, uploadWithProgress, settings, dialog } from '../core.js';
 import { registerApp, openApp } from '../wm.js';
 import { nd } from './music-navidrome.js';
 import { openAudioOutputsPopover, getAudioOutputs } from '../audio-target.js';
@@ -17,6 +17,10 @@ const ND_SORTS = [
   ['recent', 'Recently played'], ['starred', 'Favourites'], ['random', 'Random'],
 ];
 
+function musicFolders() {
+  return Array.isArray(settings.data.musicFolders) ? settings.data.musicFolders.filter(Boolean) : [];
+}
+
 function parseTrack(f) {
   let title = f.name.replace(/\.[^.]+$/, '');
   let number = null;
@@ -25,10 +29,14 @@ function parseTrack(f) {
   let artist = '';
   const dash = title.indexOf(' - ');
   if (dash > 0) { artist = title.slice(0, dash); title = title.slice(dash + 3); }
+  if (f.title) title = f.title;
+  if (f.artist) artist = f.artist;
+  if (f.track) number = f.track;
   const albumPath = dirOf(f.path);
+  const folderAlbum = albumPath === '/' ? 'Loose tracks' : baseOf(albumPath);
   return {
     key: `f:${f.path}`, path: f.path, title: title.trim() || f.name, artist, number, size: f.size,
-    format: extOf(f.name).toUpperCase(), albumPath, album: albumPath === '/' ? 'Loose tracks' : baseOf(albumPath),
+    format: extOf(f.name).toUpperCase(), albumPath, album: f.album || folderAlbum,
     src: fileUrl(f.path, true), coverUrl: null,
   };
 }
@@ -122,6 +130,7 @@ function mountMusic(win, args) {
       ndTitle, ndNav,
       h('div', { class: 'side-title' }, 'Folders'), albumNav),
     h('div', { class: 'main' }, h('div', { class: 'toolbar' }, searchInput, h('div', { class: 'tb-spacer' }),
+      h('button', { class: 'icon-btn', 'aria-label': 'Music folders', title: 'Choose folders', onclick: () => chooseFolders() }, icon('folder', 16)),
       h('button', { class: 'icon-btn', 'aria-label': 'Refresh', title: 'Refresh', onclick: () => { cache.clear(); loadLibrary(); } }, icon('refresh', 16))), content),
     player));
 
@@ -131,16 +140,24 @@ function mountMusic(win, args) {
   // ---------- local library ----------
 
   async function loadLibrary() {
-    if (!isNd()) content.replaceChildren(h('div', { class: 'empty-state' }, icon('music', 40), h('div', { class: 'empty-title' }, 'Scanning your music…')));
+    const folders = musicFolders();
+    if (!isNd() && folders.length) content.replaceChildren(h('div', { class: 'empty-state' }, icon('music', 40), h('div', { class: 'empty-title' }, 'Reading your music…')));
     try {
-      const [audioRes, imageRes] = await Promise.all([
-        api('GET', '/api/files/search?kind=audio'),
-        api('GET', '/api/files/search?kind=cover'),
-        nd.load(),
-      ]);
-      tracks = audioRes.results.map(parseTrack);
+      await nd.load();
+      const audioRes = [];
+      const imageRes = [];
+      for (const folder of folders) {
+        const q = encodeURIComponent(folder);
+        const [audio, images] = await Promise.all([
+          api('GET', `/api/files/search?kind=audio&under=${q}`),
+          api('GET', `/api/files/search?kind=cover&under=${q}`),
+        ]);
+        audioRes.push(...(audio.results || []));
+        imageRes.push(...(images.results || []));
+      }
+      tracks = audioRes.map(parseTrack);
       const covers = new Map();
-      for (const img of imageRes.results) {
+      for (const img of imageRes) {
         const dir = dirOf(img.path);
         const stem = img.name.replace(/\.[^.]+$/, '').toLowerCase();
         const score = COVER_NAMES.includes(stem) ? 2 : 1;
@@ -166,6 +183,54 @@ function mountMusic(win, args) {
       if (!tracks.length && nd.connected && view.type === 'albums' && !restoring) view = { type: 'nd-albums', sort: 'newest' };
     } catch (err) { report(err); }
     render();
+  }
+
+  function chooseFolders() {
+    const selected = musicFolders().slice();
+    let path = '/';
+    const picks = h('div', { class: 'folder-picks' });
+    const rows = h('div', { class: 'folder-pick' });
+    const here = h('div', { class: 'set-desc' });
+    const renderPicks = () => {
+      picks.replaceChildren(...selected.map((p) => h('span', { class: 'pill' }, p,
+        h('button', { class: 'icon-btn', 'aria-label': `Remove ${p}`, title: 'Remove', onclick: () => {
+          const i = selected.indexOf(p); if (i >= 0) selected.splice(i, 1); renderPicks();
+        } }, icon('x', 12)))));
+      if (!selected.length) picks.append(h('span', { class: 'set-desc' }, 'No folders yet.'));
+    };
+    const join = (dir, name) => (dir === '/' ? '' : dir) + '/' + name;
+    const parent = (p) => { const parts = p.split('/').filter(Boolean); parts.pop(); return '/' + parts.join('/'); };
+    async function load(p) {
+      path = p || '/';
+      here.textContent = path === '/' ? 'Files' : path;
+      rows.replaceChildren(h('div', { class: 'empty-state small' }, 'Loading…'));
+      try {
+        const res = await api('GET', '/api/files/list?path=' + encodeURIComponent(path));
+        const dirs = (res.entries || []).filter((e) => e.dir && !e.name.startsWith('.'));
+        const items = dirs.map((d) => h('button', {
+          class: 'device', style: { width: '100%', textAlign: 'left' }, onclick: () => load(join(path, d.name)),
+        }, h('span', { class: 'device-icon' }, icon('folder', 18)), h('div', { class: 'device-text' }, h('div', { class: 'device-name' }, d.name))));
+        const up = path !== '/' ? h('button', { class: 'device', style: { width: '100%', textAlign: 'left' }, onclick: () => load(parent(path)) },
+          h('span', { class: 'device-icon' }, icon('chevronLeft', 18)), h('div', { class: 'device-text' }, h('div', { class: 'device-name' }, 'Up'))) : null;
+        rows.replaceChildren(...[up, ...items].filter(Boolean));
+        if (!dirs.length && path === '/') rows.append(h('div', { class: 'empty-state small' }, 'No folders in Files yet'));
+      } catch (err) { report(err); }
+    }
+    renderPicks();
+    const close = dialog({
+      title: 'Music folders',
+      width: '440px',
+      body: h('div', null,
+        h('p', { class: 'dialog-text' }, 'Music reads these folders only, including their subfolders. It does not walk the rest of Files.'),
+        picks,
+        h('div', { class: 'hero-actions' }, here, h('button', { class: 'btn small', onclick: () => { if (!selected.includes(path)) selected.push(path); renderPicks(); } }, 'Add this folder')),
+        rows),
+      actions: [
+        h('button', { class: 'btn', onclick: () => close() }, 'Cancel'),
+        h('button', { class: 'btn primary', onclick: () => { settings.set({ musicFolders: selected.slice() }); close(); loadLibrary(); } }, 'Save'),
+      ],
+    });
+    load('/');
   }
 
   // ---------- sidebar ----------
@@ -203,11 +268,16 @@ function mountMusic(win, args) {
     if (isNd()) { renderNd(seq); return; }
 
     if (!tracks.length) {
+      const folders = musicFolders();
       content.replaceChildren(h('div', { class: 'empty-state' }, icon('music', 44),
-        h('div', { class: 'empty-title' }, 'No music in Files yet'),
-        h('div', { class: 'empty-sub' }, 'Upload audio files (MP3, FLAC, OGG, M4A…) anywhere in Files. A folder becomes an album; a cover.jpg inside it becomes the artwork.'),
-        nd.connected ? h('button', { class: 'btn primary', onclick: () => go({ type: 'nd-albums', sort: 'newest' }) }, icon('disc', 15), 'Browse Navidrome')
-          : h('button', { class: 'btn', onclick: () => go({ type: 'nd-connect' }) }, icon('link', 15), 'Connect a Navidrome server')));
+        h('div', { class: 'empty-title' }, folders.length ? 'No music in these folders' : 'Choose where your music lives'),
+        h('div', { class: 'empty-sub' }, folders.length
+          ? 'These folders have no audio files yet. Add another, or put music into one of them. A cover.jpg in the folder is the artwork.'
+          : 'Pick the folders to read. Music does not walk the rest of Files. Titles come from the files in those folders.'),
+        h('div', { class: 'hero-actions' },
+          h('button', { class: 'btn primary', onclick: () => chooseFolders() }, icon('folder', 15), 'Choose folders'),
+          nd.connected ? h('button', { class: 'btn', onclick: () => go({ type: 'nd-albums', sort: 'newest' }) }, icon('disc', 15), 'Browse Navidrome')
+            : h('button', { class: 'btn', onclick: () => go({ type: 'nd-connect' }) }, icon('link', 15), 'Connect a Navidrome server'))));
       win.setTitle('Music');
       return;
     }

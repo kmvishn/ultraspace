@@ -138,6 +138,10 @@ type found struct {
 	Dir     bool      `json:"dir"`
 	Size    int64     `json:"size"`
 	ModTime time.Time `json:"mtime"`
+	Title   string    `json:"title,omitempty"`
+	Artist  string    `json:"artist,omitempty"`
+	Album   string    `json:"album,omitempty"`
+	Track   int       `json:"track,omitempty"`
 }
 
 // handleSearch walks the whole files root. Symlinked folders are not followed.
@@ -163,10 +167,24 @@ func (f *Files) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n < limit {
 		limit = n
 	}
+	start := "."
+	if raw := strings.TrimSpace(r.URL.Query().Get("under")); raw != "" {
+		relPath, err := rel(raw)
+		if err != nil {
+			f.fail(w, err)
+			return
+		}
+		info, err := fs.Stat(f.root.FS(), relPath)
+		if err != nil || !info.IsDir() {
+			httpx.Error(w, http.StatusBadRequest, "folder not found")
+			return
+		}
+		start = relPath
+	}
 	results := []found{}
 	truncated := false
 	best := map[string]int{} // folder -> index in results (cover mode)
-	err := fs.WalkDir(f.root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(f.root.FS(), start, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries
 		}
@@ -201,6 +219,13 @@ func (f *Files) handleSearch(w http.ResponseWriter, r *http.Request) {
 		e := found{Path: "/" + p, Name: d.Name(), Dir: d.IsDir(), ModTime: info.ModTime()}
 		if !d.IsDir() {
 			e.Size = info.Size()
+			if kind == "audio" && !covers {
+				if file, err := f.root.Open(p); err == nil {
+					tag := readAudioTags(file, info.Size())
+					e.Title, e.Artist, e.Album, e.Track = tag.Title, tag.Artist, tag.Album, tag.Track
+					file.Close()
+				}
+			}
 		}
 		if covers {
 			if i, ok := best[dir]; ok {

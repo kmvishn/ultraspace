@@ -21,6 +21,7 @@ const SECTIONS = [
   { id: 'account', label: 'Account', icon: 'user' },
   { id: 'devices', label: 'Devices', icon: 'laptop' },
   { id: 'chatbot', label: 'Ultra Chat Bot', icon: 'sparkles' },
+  { id: 'software', label: 'Software', icon: 'archive' },
   { id: 'about', label: 'About', icon: 'info' },
 ];
 
@@ -36,7 +37,7 @@ function mountSettings(win, args) {
     if (off) { off(); off = null; }
     nav.replaceChildren(...SECTIONS.map((s) => h('button', { class: `side-item ${s.id === id ? 'active' : ''}`, onclick: () => show(s.id) }, icon(s.icon, 16), h('span', null, s.label))));
     win.setTitle(`Settings — ${SECTIONS.find((s) => s.id === id).label}`);
-    off = { appearance, sound, network, sinkhole, hardware, account, devices, chatbot, about }[id](main) || null;
+    off = { appearance, sound, network, sinkhole, hardware, account, devices, chatbot, software, about }[id](main) || null;
   };
   show(args.restore?.section || args.section || 'appearance');
   return {
@@ -439,7 +440,7 @@ function mountSettings(win, args) {
             h('span', { class: 'device-icon' }, icon('wifi', 20)),
             h('div', { class: 'device-text' },
               h('div', { class: 'device-name' }, `Setup Hotspot Active (${st.hotspot_ssid || 'Ultraspace-Setup'})`, h('span', { class: 'pill active' }, 'Broadcasting')),
-              h('div', { class: 'set-desc' }, 'Connect your phone or device to this Wi-Fi to configure the server.')),
+              h('div', { class: 'set-desc' }, 'Join this Wi-Fi and the setup page opens, the same way a router sign-in page does.')),
             h('button', { class: 'btn small', onclick: () => stopHotspot() }, 'Stop Hotspot')));
         } else {
           hotspotBox.replaceChildren(h('div', { class: 'device' },
@@ -1338,6 +1339,22 @@ function mountSettings(win, args) {
     };
     render();
     return null;
+  }
+
+  function software(el) {
+    const list = h('div', { class: 'device-list' }, h('div', { class: 'empty-state small' }, 'Checking this machine…'));
+    el.replaceChildren(h('div', { class: 'settings-page' },
+      group('Programs this release uses', 'Each one is installed or missing on this machine. update.sh installs the missing ones.', list)));
+    (async () => {
+      try {
+        const { packages } = await api('GET', '/api/host/packages');
+        list.replaceChildren(...(packages || []).map((p) => h('div', { class: 'device' },
+          h('span', { class: 'device-icon' }, icon(p.present ? 'check' : 'x', 18)),
+          h('div', { class: 'device-text' },
+            h('div', { class: 'device-name' }, p.name, h('span', { class: p.present ? 'pill active' : 'pill failed' }, p.present ? 'Installed' : 'Missing')),
+            h('div', { class: 'set-desc' }, p.present ? p.path : p.detail)))));
+      } catch (err) { report(err); list.replaceChildren(h('div', { class: 'empty-state small' }, 'Could not check this machine')); }
+    })();
   }
 
   function about(el) {

@@ -339,6 +339,7 @@ export const DEFAULTS = {
   lockShowNowPlaying: true,    // show Now Playing media widget on lockscreen
   lockShowSystemStats: true,   // show system glance widget on lockscreen
   lockCustomMessage: '',       // optional custom lockscreen note / owner info
+  musicFolders: [],            // folders Music reads; empty means it does not scan Files
 };
 
 export const settings = {

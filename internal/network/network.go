@@ -45,7 +45,7 @@ type Interface struct {
 type WiFiAccessPoint struct {
 	SSID     string `json:"ssid"`
 	BSSID    string `json:"bssid"`
-	Signal   int    `json:"signal"`   // 0 - 100
+	Signal   int    `json:"signal"` // 0 - 100
 	Channel  int    `json:"channel"`
 	Freq     string `json:"freq"`     // e.g. "2.4 GHz" or "5 GHz"
 	Security string `json:"security"` // e.g. "WPA2", "WPA3", "Open"
@@ -80,9 +80,11 @@ type DisconnectRequest struct {
 
 // Network coordinates network management.
 type Network struct {
-	log     *slog.Logger
-	runner  Runner
-	hotspot *HotspotManager
+	log           *slog.Logger
+	runner        Runner
+	hotspot       *HotspotManager
+	desktop       http.Handler // the signed-in app, published on the setup Wi-Fi
+	desktopListen string       // where that app already listens, for example 127.0.0.1:4600
 }
 
 // New creates a Network service using the system's execRunner.
@@ -108,6 +110,16 @@ func (n *Network) EnableHotspot(cfg HotspotConfig) *HotspotManager {
 // Hotspot returns the active HotspotManager.
 func (n *Network) Hotspot() *HotspotManager {
 	return n.hotspot
+}
+
+// PublishDesktop remembers the app so the setup page can open it from a phone.
+// listen is the address the app already serves, such as 127.0.0.1:4600.
+func (n *Network) PublishDesktop(h http.Handler, listen string) {
+	if n == nil {
+		return
+	}
+	n.desktop = h
+	n.desktopListen = listen
 }
 
 // Register wires HTTP endpoints into the router.
@@ -343,6 +355,16 @@ func (n *Network) ScanWiFi(ctx context.Context, rescan bool) ([]WiFiAccessPoint,
 
 // ConnectWiFi connects to a Wi-Fi network.
 func (n *Network) ConnectWiFi(ctx context.Context, req ConnectRequest) error {
+	if err := validateConnect(req); err != nil {
+		return err
+	}
+	if n.hotspot != nil && n.hotspot.active {
+		_ = n.hotspot.StopHotspot(ctx)
+	}
+	return n.connectWiFi(ctx, req)
+}
+
+func validateConnect(req ConnectRequest) error {
 	ssid := strings.TrimSpace(req.SSID)
 	if ssid == "" {
 		return errors.New("SSID cannot be empty")
@@ -356,11 +378,15 @@ func (n *Network) ConnectWiFi(ctx context.Context, req ConnectRequest) error {
 	if req.Device != "" && (len(req.Device) > 32 || strings.ContainsAny(req.Device, " /\\;\r\n\x00")) {
 		return errors.New("invalid device name")
 	}
+	return nil
+}
 
-	if n.hotspot != nil && n.hotspot.active {
-		_ = n.hotspot.StopHotspot(ctx)
+// connectWiFi runs nmcli without changing the setup hotspot.
+func (n *Network) connectWiFi(ctx context.Context, req ConnectRequest) error {
+	if err := validateConnect(req); err != nil {
+		return err
 	}
-
+	ssid := strings.TrimSpace(req.SSID)
 	args := []string{"dev", "wifi", "connect", ssid}
 	if req.Password != "" {
 		args = append(args, "password", req.Password)

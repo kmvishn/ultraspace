@@ -81,4 +81,13 @@ EOF
   if id pulse >/dev/null 2>&1; then
     usermod -aG bluetooth,audio pulse 2>/dev/null || true
   fi
+
+  # DNS for the setup hotspot only. NetworkManager reads this when it shares
+  # a connection, so phones that join Ultraspace-Setup get the setup page.
+  mkdir -p /etc/NetworkManager/dnsmasq-shared.d
+  cat << 'EOF' > /etc/NetworkManager/dnsmasq-shared.d/ultraspace-setup.conf
+# Captive portal for the Ultraspace-Setup hotspot. Not used by the host's own DNS.
+address=/#/10.42.0.1
+dhcp-option=114,http://10.42.0.1/
+EOF
 }
