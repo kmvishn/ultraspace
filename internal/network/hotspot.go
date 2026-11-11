@@ -50,6 +50,7 @@ type HotspotManager struct {
 	net          *Network
 	cfg          HotspotConfig
 	active       bool
+	starting     bool
 	activeSSID   string
 	activeDev    string
 	offlineSince time.Time
@@ -215,23 +216,40 @@ func (h *HotspotManager) Run(ctx context.Context) {
 	}
 }
 
+// hasUplink reports whether a Wi-Fi or Ethernet interface is connected to something
+// other than this fallback hotspot. The hotspot's own link must not count, or the
+// watchdog brings the AP up and then immediately tears it down.
+func (h *HotspotManager) hasUplink(st *Status) bool {
+	for _, iface := range st.Interfaces {
+		if iface.State != "connected" || h.isHotspotLink(iface) {
+			continue
+		}
+		if iface.Type == "wifi" || iface.Type == "ethernet" {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *HotspotManager) isHotspotLink(iface Interface) bool {
+	name := iface.Connection
+	return name != "" && (name == "Hotspot" || name == h.cfg.SSID)
+}
+
 func (h *HotspotManager) checkStep(ctx context.Context) {
 	st, err := h.net.GetStatus(ctx)
 	if err != nil || !st.Available {
 		return
 	}
 
-	// Check if any interface is online
-	hasInternet := st.Connected
+	uplink := h.hasUplink(st)
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if hasInternet {
-		// Connected to an existing network
+	if uplink {
 		h.offlineSince = time.Time{}
-		if h.active {
-			// If hotspot is currently on and another interface connected, we can stop the hotspot
+		if h.active || h.starting {
 			go func() {
 				_ = h.StopHotspot(context.Background())
 			}()
@@ -239,9 +257,8 @@ func (h *HotspotManager) checkStep(ctx context.Context) {
 		return
 	}
 
-	// Currently disconnected
-	if h.active {
-		// Hotspot already active
+	// Hotspot is already up, or a start is in flight. Its own connection is not an uplink.
+	if h.active || h.starting {
 		return
 	}
 
@@ -251,11 +268,17 @@ func (h *HotspotManager) checkStep(ctx context.Context) {
 		return
 	}
 
-	// Check if grace period has elapsed
 	if now.Sub(h.offlineSince) >= h.cfg.GracePeriod {
+		h.starting = true
 		h.net.log.Info("offline timeout reached, launching fallback hotspot")
 		go func() {
-			_ = h.StartHotspot(context.Background())
+			err := h.StartHotspot(context.Background())
+			h.mu.Lock()
+			h.starting = false
+			h.mu.Unlock()
+			if err != nil {
+				h.net.log.Error("fallback hotspot start failed", "err", err)
+			}
 		}()
 	}
 }

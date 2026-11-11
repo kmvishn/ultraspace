@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -210,5 +211,133 @@ func TestHotspotHTTPHandlers(t *testing.T) {
 	if w.Code != http.StatusOK {
 		b, _ := io.ReadAll(w.Body)
 		t.Fatalf("POST /api/network/hotspot/start code = %d, body: %s", w.Code, string(b))
+	}
+}
+
+func TestHotspotStaysUpWithoutUplink(t *testing.T) {
+	for _, conn := range []string{"Hotspot", "Ultraspace-Setup"} {
+		t.Run(conn, func(t *testing.T) {
+			var stopped bool
+			var mu sync.Mutex
+			runner := &mockRunner{
+				handlers: map[string]func(args []string) ([]byte, error){
+					"dev status": func(args []string) ([]byte, error) {
+						return []byte("wlan0:wifi:connected:" + conn + "\neth0:ethernet:unavailable:\ndocker0:bridge:connected:docker0\n"), nil
+					},
+					"dev show wlan0": func(args []string) ([]byte, error) {
+						return []byte("IP4.ADDRESS[1]:10.42.0.1/24\n"), nil
+					},
+					"dev show eth0": func(args []string) ([]byte, error) {
+						return []byte("GENERAL.DEVICE:eth0\n"), nil
+					},
+					"dev show docker0": func(args []string) ([]byte, error) {
+						return []byte("IP4.ADDRESS[1]:172.17.0.1/16\n"), nil
+					},
+					"con show --active": func(args []string) ([]byte, error) {
+						return []byte(conn + ":802-11-wireless:wlan0\n"), nil
+					},
+					"con down": func(args []string) ([]byte, error) {
+						mu.Lock()
+						stopped = true
+						mu.Unlock()
+						return []byte("ok"), nil
+					},
+				},
+			}
+
+			hm := NewWithRunner(slog.Default(), runner).Hotspot()
+			hm.checkStep(context.Background())
+			time.Sleep(30 * time.Millisecond)
+
+			mu.Lock()
+			defer mu.Unlock()
+			if stopped {
+				t.Fatal("hotspot was stopped while it was the only link")
+			}
+			if !hm.active {
+				t.Fatal("expected hotspot to stay active")
+			}
+		})
+	}
+}
+
+func TestHotspotStopsWhenEthernetConnects(t *testing.T) {
+	var stopped bool
+	var mu sync.Mutex
+	runner := &mockRunner{
+		handlers: map[string]func(args []string) ([]byte, error){
+			"dev status": func(args []string) ([]byte, error) {
+				return []byte("wlan0:wifi:connected:Hotspot\neth0:ethernet:connected:Wired connection 1\n"), nil
+			},
+			"dev show wlan0": func(args []string) ([]byte, error) {
+				return []byte("IP4.ADDRESS[1]:10.42.0.1/24\n"), nil
+			},
+			"dev show eth0": func(args []string) ([]byte, error) {
+				return []byte("IP4.ADDRESS[1]:192.168.1.20/24\nIP4.GATEWAY:192.168.1.1\n"), nil
+			},
+			"con show --active": func(args []string) ([]byte, error) {
+				return []byte("Hotspot:802-11-wireless:wlan0\nWired connection 1:802-3-ethernet:eth0\n"), nil
+			},
+			"con down": func(args []string) ([]byte, error) {
+				mu.Lock()
+				stopped = true
+				mu.Unlock()
+				return []byte("ok"), nil
+			},
+		},
+	}
+
+	hm := NewWithRunner(slog.Default(), runner).Hotspot()
+	hm.checkStep(context.Background())
+	time.Sleep(30 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !stopped {
+		t.Fatal("expected hotspot to stop once ethernet is connected")
+	}
+}
+
+func TestHotspotRetriesAfterStartFailure(t *testing.T) {
+	var calls int
+	var mu sync.Mutex
+	runner := &mockRunner{
+		handlers: map[string]func(args []string) ([]byte, error){
+			"dev status": func(args []string) ([]byte, error) {
+				return []byte("wlan0:wifi:disconnected:\neth0:ethernet:unavailable:\n"), nil
+			},
+			"dev show wlan0": func(args []string) ([]byte, error) {
+				return []byte("GENERAL.DEVICE:wlan0\n"), nil
+			},
+			"dev show eth0": func(args []string) ([]byte, error) {
+				return []byte("GENERAL.DEVICE:eth0\n"), nil
+			},
+			"wifi hotspot": func(args []string) ([]byte, error) {
+				mu.Lock()
+				calls++
+				mu.Unlock()
+				return []byte("Not authorized"), fmt.Errorf("exit status 4")
+			},
+			"con show --active": func(args []string) ([]byte, error) {
+				return []byte(""), nil
+			},
+		},
+	}
+
+	cfg := DefaultHotspotConfig()
+	cfg.GracePeriod = 20 * time.Millisecond
+	hm := NewWithRunner(slog.Default(), runner).EnableHotspot(cfg)
+
+	hm.checkStep(context.Background())
+	time.Sleep(35 * time.Millisecond)
+	hm.checkStep(context.Background())
+	time.Sleep(30 * time.Millisecond)
+	hm.checkStep(context.Background())
+	time.Sleep(30 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls < 2 {
+		t.Fatalf("start attempts = %d, want at least 2 after a failure", calls)
 	}
 }
