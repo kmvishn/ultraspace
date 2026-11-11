@@ -164,14 +164,37 @@ function menuBar(user, onSignOut) {
   }, icon(iconName, 14), val);
 
   const soundBtn = h('button', {
-    class: 'mb-item mb-sound-btn', 'aria-label': 'Sound', title: 'Audio Output Devices',
+    class: 'mb-item mb-sound-btn mb-act', 'aria-label': 'Sound', title: 'Audio Output Devices',
     onclick: (e) => {
       e.stopPropagation();
       openAudioOutputsPopover(soundBtn);
     },
   }, icon('volume', 15));
-  const wifiBtn = h('button', { class: 'mb-item', 'aria-label': 'Network', title: 'Network & Wi-Fi', onclick: () => openApp('settings', { section: 'network' }) }, icon('wifi', 15));
-  const batBtn = h('button', { class: 'mb-item hidden', 'aria-label': 'Battery', title: 'Battery', onclick: () => openApp('system') }, icon('battery', 15), h('span', { class: 'mb-val' }, '–'));
+  const wifiBtn = h('button', { class: 'mb-item mb-act', 'aria-label': 'Network', title: 'Network & Wi-Fi', onclick: () => openApp('settings', { section: 'network' }) }, icon('wifi', 15));
+  const batBtn = h('button', { class: 'mb-item mb-act hidden', 'aria-label': 'Battery', title: 'Battery', onclick: () => openApp('system') }, icon('battery', 15), h('span', { class: 'mb-val' }, '–'));
+  const clipBtn = h('button', { class: 'mb-item mb-clip mb-act', 'aria-label': 'Shared clipboard', title: 'Shared clipboard', onclick: (e) => togglePanel(e.currentTarget) }, icon('clipboard', 15));
+  const searchBtn = h('button', { class: 'mb-item mb-act', 'aria-label': 'Search', title: 'Search (Ctrl K)', onclick: openLauncher }, icon('search', 15));
+  const userBtn = h('button', { class: 'mb-item mb-act', onclick: () => openApp('settings', { section: 'account' }) }, icon('user', 15), h('span', { class: 'mb-user' }, user.username));
+
+  const qsBat = h('span', { class: 'qs-status-bat hidden' });
+  const qsLaunch = h('button', {
+    class: 'mb-item qs-launch', 'aria-label': 'Quick settings', 'aria-expanded': 'false', title: 'Quick settings',
+  }, icon('volume', 14), icon('wifi', 14), qsBat);
+
+  const tile = (iconName, label, action) => h('button', {
+    class: 'qs-tile',
+    onclick: (e) => { e.stopPropagation(); closeQs(); action(); },
+  }, icon(iconName, 20), h('span', null, label));
+
+  const qs = h('div', { class: 'qs glass', role: 'dialog', 'aria-label': 'Quick settings' },
+    tile('volume', 'Sound', () => openAudioOutputsPopover(qsLaunch)),
+    tile('wifi', 'Wi-Fi', () => openApp('settings', { section: 'network' })),
+    tile('search', 'Search', openLauncher),
+    tile('clipboard', 'Clipboard', () => togglePanel(qsLaunch)),
+    tile('lock', 'Lock', lockDesktop),
+    tile('user', 'Account', () => openApp('settings', { section: 'account' })));
+
+  const shade = h('div', { class: 'qs-shade', onclick: () => closeQs() });
 
   const bar = h('header', { class: 'menubar glass' },
     logo, appName,
@@ -181,10 +204,27 @@ function menuBar(user, onSignOut) {
     soundBtn,
     wifiBtn,
     batBtn,
-    h('button', { class: 'mb-item mb-clip', 'aria-label': 'Shared clipboard', title: 'Shared clipboard', onclick: (e) => togglePanel(e.currentTarget) }, icon('clipboard', 15)),
-    h('button', { class: 'mb-item', 'aria-label': 'Search', title: 'Search (Ctrl K)', onclick: openLauncher }, icon('search', 15)),
-    h('button', { class: 'mb-item', onclick: () => openApp('settings', { section: 'account' }) }, icon('user', 15), h('span', { class: 'mb-user' }, user.username)),
-    clock);
+    clipBtn,
+    searchBtn,
+    userBtn,
+    qsLaunch,
+    clock,
+    qs);
+
+  const closeQs = () => {
+    bar.classList.remove('qs-open');
+    shade.classList.remove('on');
+    qsLaunch.setAttribute('aria-expanded', 'false');
+  };
+  qsLaunch.addEventListener('pointerdown', (e) => e.stopPropagation());
+  qs.addEventListener('pointerdown', (e) => e.stopPropagation());
+  qsLaunch.addEventListener('click', () => {
+    const open = bar.classList.toggle('qs-open');
+    shade.classList.toggle('on', open);
+    qsLaunch.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  document.body.append(shade);
+  cleanup.push(() => shade.remove());
 
   const updatePower = async () => {
     try {
@@ -193,8 +233,11 @@ function menuBar(user, onSignOut) {
         batBtn.classList.remove('hidden');
         batBtn.replaceChildren(icon('battery', 15), h('span', { class: 'mb-val' }, `${p.percent}%`));
         batBtn.title = `Battery: ${p.percent}% (${p.status})${p.temperature_c ? ` · CPU: ${p.temperature_c.toFixed(1)}°C` : ''}`;
+        qsBat.textContent = `${p.percent}%`;
+        qsBat.classList.remove('hidden');
       } else {
         batBtn.classList.add('hidden');
+        qsBat.classList.add('hidden');
       }
     } catch (_) {}
   };
@@ -202,11 +245,17 @@ function menuBar(user, onSignOut) {
   const pTimer = setInterval(updatePower, 30_000);
   cleanup.push(() => clearInterval(pTimer));
 
-  const fmtTime = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  const tick = () => { clock.textContent = fmtTime.format(new Date()).replace(',', ''); };
+  const narrow = matchMedia('(max-width: 760px)');
+  const fmtFull = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const fmtShort = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hourCycle: 'h23' });
+  const tick = () => {
+    clock.textContent = narrow.matches ? fmtShort.format(new Date()) : fmtFull.format(new Date()).replace(',', '');
+  };
+  const onNarrow = () => { tick(); if (!narrow.matches) closeQs(); };
   tick();
   const t = setInterval(tick, 10_000);
-  cleanup.push(() => clearInterval(t));
+  narrow.addEventListener('change', onNarrow);
+  cleanup.push(() => { clearInterval(t); narrow.removeEventListener('change', onNarrow); });
 
   cleanup.push(on('system', (s) => {
     cpu.textContent = `${s.cpu.percent.toFixed(0)}%`;

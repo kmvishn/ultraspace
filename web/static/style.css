@@ -191,6 +191,24 @@ button:disabled { cursor: default; opacity: .45; }
 .mb-music { max-width: 220px; color: var(--accent); }
 .mb-music span { overflow: hidden; text-overflow: ellipsis; }
 .mb-user { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.qs-launch { display: none; }
+.qs, .qs-shade { display: none; }
+.qs-shade { position: fixed; inset: 0; z-index: 8500; }
+.qs-shade.on { display: block; }
+.qs {
+  position: absolute; top: calc(100% + 8px); right: 8px; z-index: 2;
+  width: min(248px, calc(100vw - 16px)); padding: 8px; border-radius: 16px;
+  grid-template-columns: repeat(3, 1fr); gap: 6px;
+  box-shadow: var(--shadow-pop);
+}
+.qs-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  min-height: 58px; padding: 8px 4px; border-radius: 12px;
+  background: var(--hover); color: var(--text); font-size: 11px;
+}
+.qs-tile:active { background: var(--active); }
+.qs-launch { gap: 5px; color: var(--text-2); }
+.qs-status-bat { font-size: 12px; font-variant-numeric: tabular-nums; }
 
 /* ---------- dock ---------- */
 
@@ -720,10 +738,32 @@ kbd { font-family: var(--font); font-size: 11px; padding: 2px 6px; border-radius
 }
 
 @media (max-width: 760px) {
-  .mb-stats, .mb-user { display: none; }
-  .widgets { left: 16px; right: 16px; width: auto; top: 46px; }
+  .menubar {
+    height: calc(44px + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) max(2px, env(safe-area-inset-right, 0px)) 0 max(2px, env(safe-area-inset-left, 0px));
+    gap: 0;
+  }
+  .menubar .mb-item { height: 36px; min-width: 32px; padding: 0 4px; justify-content: center; }
+  .menubar .mb-logo { padding: 0 8px; }
+  .menubar .mb-app,
+  .menubar .mb-music,
+  .menubar .mb-stats,
+  .menubar .mb-user,
+  .menubar .mb-val,
+  .menubar .mb-spacer,
+  .menubar .mb-act { display: none; }
+  .menubar .qs-launch { display: inline-flex; margin-left: auto; }
+  .menubar.qs-open .qs { display: grid; }
+  .mb-clock { margin-left: 0; padding: 0 8px 0 4px; font-size: 13px; }
+  .widgets { left: 16px; right: 16px; width: auto; top: calc(56px + env(safe-area-inset-top, 0px)); }
   .toolbar { flex-wrap: wrap; }
-  .win { left: 0 !important; top: 32px !important; width: 100% !important; height: calc(100% - 32px - 76px) !important; border-radius: 0; border-width: 0; }
+  .win {
+    left: 0 !important;
+    top: calc(44px + env(safe-area-inset-top, 0px)) !important;
+    width: 100% !important;
+    height: calc(100% - 44px - env(safe-area-inset-top, 0px) - 76px - env(safe-area-inset-bottom, 0px)) !important;
+    border-radius: 0; border-width: 0;
+  }
   .win .rz, .lights .light.max { display: none; }
   .dock-wrap { bottom: 6px; }
   .dock-tile { width: 44px; height: 44px; border-radius: 12px; }
