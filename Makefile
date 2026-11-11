@@ -5,7 +5,7 @@ SSH_KEY ?= $(HOME)/.ssh/id_ed25519
 SSH     := ssh -o IdentitiesOnly=yes -i $(SSH_KEY)
 SCP     := scp -o IdentitiesOnly=yes -i $(SSH_KEY)
 
-.PHONY: build build-arm64 run test deploy clean
+.PHONY: build build-arm64 run test deploy update clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/ultraspace .
@@ -25,6 +25,12 @@ test:
 deploy: build
 	$(SCP) bin/ultraspace $(HOST):/tmp/ultraspace
 	$(SSH) $(HOST) 'sudo install -m 755 /tmp/ultraspace /usr/local/bin/ultraspace && rm /tmp/ultraspace && sudo systemctl restart ultraspace && systemctl is-active ultraspace'
+
+# Build, install any new dependency packages, replace the binary, restart.
+# Config and data on the server are left alone.
+update: build
+	$(SCP) bin/ultraspace deploy/update.sh deploy/dependencies.sh $(HOST):/tmp/
+	$(SSH) $(HOST) 'sudo sh /tmp/update.sh /tmp/ultraspace && rm -f /tmp/ultraspace /tmp/update.sh /tmp/dependencies.sh'
 
 clean:
 	rm -rf bin dev-data

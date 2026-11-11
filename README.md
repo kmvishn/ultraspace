@@ -706,14 +706,21 @@ Restarting the agent ends open terminal sessions; VS Code keeps its editors, uns
 
 ### 6. Updating
 
-Either unpack a newer release on the server and run `sudo ./install.sh`, or from your own machine:
+From your own machine, build, install any dependency packages the release needs, replace the binary and restart:
 
 ```sh
-make deploy HOST=user@server SSH_KEY=~/.ssh/id_ed25519
+make update HOST=user@server SSH_KEY=~/.ssh/id_ed25519
 ```
 
-This builds, copies the binary and restarts `ultraspace`. Restarting `ultraspace-agent` (only needed when the agent
-code changes) ends running terminal sessions.
+`make deploy` only copies the binary and restarts. Use `make update` when a release added packages (audio, bluetooth, ffmpeg, NetworkManager, and the rest of the list in `deploy/dependencies.sh`). New packages go in that file; both `install.sh` and `update.sh` install them. Config and data are kept.
+
+On the server itself, with a binary already copied over:
+
+```sh
+sudo ./deploy/update.sh /tmp/ultraspace
+```
+
+`sudo ./install.sh` still does a full install or update from an unpacked release. Restarting `ultraspace-agent` (only needed when the agent code changes) ends running terminal sessions.
 
 ---
 
