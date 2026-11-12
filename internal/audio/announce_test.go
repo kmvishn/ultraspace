@@ -42,7 +42,7 @@ func announceAudio(t *testing.T) (*Audio, *[]string) {
 
 func TestAnnounceTextSpeaksOnChosenSpeaker(t *testing.T) {
 	a, calls := announceAudio(t)
-	err := a.AnnounceText(context.Background(), "  dinner is ready  ", "", []string{"alsa_output.pci-0000_00_1f.3.analog-stereo"})
+	err := a.AnnounceText(context.Background(), "  dinner is ready  ", "", []string{"alsa_output.pci-0000_00_1f.3.analog-stereo"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestAnnounceTextSpeaksOnChosenSpeaker(t *testing.T) {
 
 func TestAnnounceRejectsUnknownSpeaker(t *testing.T) {
 	a, calls := announceAudio(t)
-	err := a.AnnounceText(context.Background(), "hello", "", []string{"no-such-speaker"})
+	err := a.AnnounceText(context.Background(), "hello", "", []string{"no-such-speaker"}, 0)
 	if err == nil || !strings.Contains(err.Error(), "connected") {
 		t.Fatalf("err = %v", err)
 	}
@@ -85,9 +85,9 @@ func TestAnnounceBusy(t *testing.T) {
 	a.findSpeech = func() (string, error) { return "espeak-ng", nil }
 	sink := []string{"alsa_output.pci-0000_00_1f.3.analog-stereo"}
 	done := make(chan error, 1)
-	go func() { done <- a.AnnounceText(context.Background(), "first", "", sink) }()
+	go func() { done <- a.AnnounceText(context.Background(), "first", "", sink, 0) }()
 	<-started
-	err := a.AnnounceText(context.Background(), "second", "", sink)
+	err := a.AnnounceText(context.Background(), "second", "", sink, 0)
 	if err == nil || !strings.Contains(err.Error(), "already playing") {
 		t.Fatalf("err = %v", err)
 	}
@@ -162,6 +162,18 @@ Source #2
 	}
 }
 
+func TestSpeakingRate(t *testing.T) {
+	if got, err := speakingRate(0); err != nil || got != 160 {
+		t.Fatalf("default = %d %v", got, err)
+	}
+	if got, err := speakingRate(80); err != nil || got != 80 {
+		t.Fatalf("slow = %d %v", got, err)
+	}
+	if _, err := speakingRate(50); err == nil {
+		t.Fatal("accepted a speed outside the range")
+	}
+}
+
 func TestAnnounceUsesChosenVoice(t *testing.T) {
 	a, calls := announceAudio(t)
 	a.runner = &mockRunner{handlers: map[string]func([]string) ([]byte, error){
@@ -172,20 +184,21 @@ func TestAnnounceUsesChosenVoice(t *testing.T) {
 		"--voices": func(args []string) ([]byte, error) {
 			return []byte("Pty Language Age/Gender VoiceName File\n 5  variant --/M Adam !v/adam\n"), nil
 		},
-		"-s 160": func(args []string) ([]byte, error) {
+		"-s 120": func(args []string) ([]byte, error) {
 			*calls = append(*calls, "espeak "+strings.Join(args, " "))
 			return nil, nil
 		},
 		"--audio-device": func(args []string) ([]byte, error) { return nil, nil },
 	}}
-	err := a.AnnounceText(context.Background(), "hello", "en+adam", []string{"alsa_output.pci-0000_00_1f.3.analog-stereo"})
+	err := a.AnnounceText(context.Background(), "hello", "en+adam", []string{"alsa_output.pci-0000_00_1f.3.analog-stereo"}, 120)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(strings.Join(*calls, " "), "-v en+adam") {
+	joined := strings.Join(*calls, " ")
+	if !strings.Contains(joined, "-v en+adam") || !strings.Contains(joined, "-s 120") {
 		t.Fatalf("calls = %v", *calls)
 	}
-	if err := a.AnnounceText(context.Background(), "hello", "nope", []string{"alsa_output.pci-0000_00_1f.3.analog-stereo"}); err == nil {
+	if err := a.AnnounceText(context.Background(), "hello", "nope", []string{"alsa_output.pci-0000_00_1f.3.analog-stereo"}, 0); err == nil {
 		t.Fatal("unknown voice was accepted")
 	}
 }

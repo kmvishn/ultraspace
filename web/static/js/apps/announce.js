@@ -35,6 +35,8 @@ function mountAnnounce(win) {
   const text = h('textarea', { maxlength: String(MAX), placeholder: 'Type an announcement', 'aria-label': 'Announcement' });
   const kicker = h('p', { class: 'kicker' }, 'Announcement');
   const count = h('span', { class: 'count' }, '0 / ' + MAX);
+  const speed = h('input', { type: 'range', class: 'range', min: '80', max: '260', step: '10', value: '160', 'aria-label': 'Speaking speed' });
+  const speedLabel = h('span', { class: 'count' }, '160 wpm');
   const speak = h('button', { class: 'btn primary', type: 'button' }, icon('megaphone', 15), 'Speak');
   const record = h('button', { class: 'btn', type: 'button' }, icon('mic', 15), 'Record');
   const speakers = h('div', { class: 'stack' });
@@ -75,6 +77,12 @@ function mountAnnounce(win) {
     renderVoice();
     voiceBtn.focus();
   });
+  speed.addEventListener('input', () => {
+    const span = Number(speed.max) - Number(speed.min);
+    speed.style.setProperty('--fill', ((Number(speed.value) - Number(speed.min)) / span * 100) + '%');
+    speedLabel.textContent = speed.value + ' wpm';
+  });
+  speed.dispatchEvent(new Event('input'));
   text.addEventListener('input', () => {
     count.textContent = text.value.length + ' / ' + MAX;
     syncButtons();
@@ -99,6 +107,7 @@ function mountAnnounce(win) {
       text,
       voicePop,
       voiceAnchor,
+      h('label', { class: 'speed' }, h('span', { class: 'kicker' }, 'Speed'), speed, speedLabel),
       h('div', { class: 'row' }, speak, record),
       msg),
     player));
@@ -277,7 +286,7 @@ function mountAnnounce(win) {
     syncButtons();
     msg.textContent = 'Speaking…';
     try {
-      await api('POST', '/api/audio/announce/text', { text: message, voice: voiceId, sinks: [...picked] });
+      await api('POST', '/api/audio/announce/text', { text: message, voice: voiceId, sinks: [...picked], speed: Number(speed.value) });
       msg.textContent = 'Played.';
       toast('Announcement played');
     } catch (err) {

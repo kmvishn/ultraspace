@@ -552,6 +552,9 @@ button.crumb:hover { background: var(--hover); color: var(--text); }
 .app-announce .voice-caret { margin-left: auto; color: var(--muted); transition: transform .15s var(--ease); }
 .app-announce .voice-anchor.open .voice-caret { transform: rotate(180deg); }
 .app-announce .voice-pop { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px; border-radius: 12px; background: var(--win-bg-2); border: 1px solid var(--border); }
+.app-announce .speed { display: flex; align-items: center; gap: 10px; }
+.app-announce .speed .range { flex: 1; }
+.app-announce .speed .kicker { flex: none; }
 .app-announce .cam-box { position: relative; flex: none; max-height: 240px; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: #000; }
 .app-announce .cam { width: 100%; height: 100%; object-fit: cover; display: block; background: #000; }
 .app-announce .cam-cap { position: absolute; left: 10px; bottom: 8px; margin: 0; font-size: 12px; color: #fff; text-shadow: 0 1px 3px #000; }

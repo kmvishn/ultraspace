@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -42,8 +43,29 @@ type Mic struct {
 	Description string `json:"description"`
 }
 
-func (a *Audio) AnnounceText(ctx context.Context, text, voice string, sinks []string) error {
+const (
+	speechRateDefault = 160
+	speechRateMin     = 80
+	speechRateMax     = 260
+)
+
+// speakingRate is words per minute for eSpeak. Zero means the usual pace.
+func speakingRate(wpm int) (int, error) {
+	if wpm == 0 {
+		return speechRateDefault, nil
+	}
+	if wpm < speechRateMin || wpm > speechRateMax {
+		return 0, errors.New("choose a speaking speed")
+	}
+	return wpm, nil
+}
+
+func (a *Audio) AnnounceText(ctx context.Context, text, voice string, sinks []string, wpm int) error {
 	text, err := cleanAnnouncement(text)
+	if err != nil {
+		return err
+	}
+	wpm, err = speakingRate(wpm)
 	if err != nil {
 		return err
 	}
@@ -63,7 +85,7 @@ func (a *Audio) AnnounceText(ctx context.Context, text, voice string, sinks []st
 		name := f.Name()
 		_ = f.Close()
 		defer os.Remove(name)
-		args := []string{"-w", name, "-s", "160"}
+		args := []string{"-w", name, "-s", strconv.Itoa(wpm)}
 		if voice != "" {
 			args = append(args, "-v", voice)
 		}
@@ -202,13 +224,14 @@ func (a *Audio) handleAnnounceText(w http.ResponseWriter, r *http.Request) {
 		Text  string   `json:"text"`
 		Voice string   `json:"voice"`
 		Sinks []string `json:"sinks"`
+		Speed int      `json:"speed"`
 	}
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
-	if err := a.AnnounceText(ctx, req.Text, req.Voice, req.Sinks); err != nil {
+	if err := a.AnnounceText(ctx, req.Text, req.Voice, req.Sinks, req.Speed); err != nil {
 		a.log.Warn("text announcement", "err", err)
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
