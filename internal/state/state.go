@@ -21,6 +21,7 @@ var limits = map[string]int64{
 	"browser":   256 << 10,
 	"media":     128 << 10, // video resume positions
 	"stremio":   512 << 10, // installed addons (with their manifests) and the library
+	"tube":      256 << 10, // Tube region, subscriptions, playlists and history
 }
 
 type Handler struct {

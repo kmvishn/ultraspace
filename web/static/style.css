@@ -552,6 +552,101 @@ button.crumb:hover { background: var(--hover); color: var(--text); }
 .app-announce .voice-caret { margin-left: auto; color: var(--muted); transition: transform .15s var(--ease); }
 .app-announce .voice-anchor.open .voice-caret { transform: rotate(180deg); }
 .app-announce .voice-pop { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px; border-radius: 12px; background: var(--win-bg-2); border: 1px solid var(--border); }
+/* ---- Tube: a YouTube-shaped layout — top bar, rail, chips, grid, watch page ---- */
+.app-tube { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; background: var(--win-bg); }
+.app-tube .tube-top { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex: none; }
+.app-tube .tube-brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; letter-spacing: -.02em; flex: none; }
+.app-tube .tube-logo { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 21px; border-radius: 6px; background: #dc2626; color: #fff; }
+.app-tube .tube-searchbox { flex: 1; display: flex; max-width: 560px; margin: 0 auto; }
+.app-tube .tube-search-input { flex: 1; min-width: 0; height: 38px; padding: 0 16px; border: 1px solid var(--border); border-right: 0; border-radius: 999px 0 0 999px; background: var(--win-bg-2); color: inherit; font: inherit; outline: none; }
+.app-tube .tube-search-input:focus { border-color: var(--accent, #7c6cf2); }
+.app-tube .tube-search-btn { flex: none; width: 56px; height: 38px; border: 1px solid var(--border); border-radius: 0 999px 999px 0; background: var(--win-bg-2); color: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.app-tube .tube-search-btn:hover { background: var(--hover, rgba(127, 127, 160, .16)); }
+.app-tube .tube-region { flex: none; height: 38px; max-width: 132px; border-radius: 999px; }
+.app-tube .tube-main { flex: 1; display: flex; min-height: 0; }
+.app-tube .tube-rail { flex: none; width: 76px; display: flex; flex-direction: column; gap: 4px; padding: 10px 6px; border-right: 1px solid var(--border); overflow-y: auto; }
+.app-tube .tube-rail-btn { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 2px; border: 0; border-radius: 12px; background: none; color: inherit; font-size: 10.5px; cursor: pointer; }
+.app-tube .tube-rail-btn:hover { background: var(--hover, rgba(127, 127, 160, .16)); }
+.app-tube .tube-rail-btn.active { background: var(--hover, rgba(127, 127, 160, .22)); font-weight: 600; }
+.app-tube .tube-content { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.app-tube .tube-scroll { padding: 14px 18px 22px; }
+.app-tube .tube-heading { margin: 0 0 4px; font-size: 19px; letter-spacing: -.01em; }
+.app-tube .tube-status { min-height: 1.2em; }
+.app-tube .tube-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 14px; }
+.app-tube .tube-chip { padding: 7px 13px; border: 0; border-radius: 9px; background: var(--win-bg-2); color: inherit; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.app-tube .tube-chip:hover { background: var(--hover, rgba(127, 127, 160, .22)); }
+.app-tube .tube-sub-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 13px; cursor: default; }
+.app-tube .tube-sub-name { background: none; border: 0; color: inherit; font: inherit; font-weight: 500; cursor: pointer; padding: 3px 0; }
+.app-tube .tube-sub-x { display: inline-flex; border: 0; background: none; color: var(--muted); cursor: pointer; padding: 4px; border-radius: 50%; }
+.app-tube .tube-import { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.app-tube .tube-import-input { min-width: min(340px, 100%); flex: 1; }
+.app-tube .tube-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(235px, 1fr)); gap: 18px 14px; }
+.app-tube .tube-card { position: relative; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.app-tube .tube-thumbbtn { position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 12px; overflow: hidden; background: #000; padding: 0; cursor: pointer; }
+.app-tube .tube-thumbbtn img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.app-tube .tube-thumb-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); background: var(--win-bg-2); }
+.app-tube .tube-dur { position: absolute; right: 6px; bottom: 6px; padding: 1px 6px; border-radius: 6px; background: rgba(0, 0, 0, .78); color: #fff; font-size: 11px; font-weight: 500; }
+.app-tube .tube-live-badge { background: #dc2626; right: auto; left: 6px; }
+.app-tube .tube-thumbbtn .tube-live-badge { left: 6px; right: auto; }
+.app-tube .tube-save { position: absolute; top: 6px; right: 6px; display: inline-flex; padding: 7px; border: 0; border-radius: 50%; background: rgba(0, 0, 0, .62); color: #fff; cursor: pointer; opacity: 0; transition: opacity .15s; }
+.app-tube .tube-card:hover .tube-save, .app-tube .tube-save:focus-visible { opacity: 1; }
+.app-tube .tube-card-meta { display: flex; gap: 10px; min-width: 0; }
+.app-tube .tube-avatar { flex: none; width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, #f87171, #7c6cf2); color: #fff; font-weight: 700; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; }
+.app-tube .tube-avatar-lg { width: 40px; height: 40px; font-size: 16px; }
+.app-tube .tube-card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.app-tube .tube-card-title { text-align: left; background: none; border: 0; padding: 0; color: inherit; font: inherit; font-weight: 600; line-height: 1.32; cursor: pointer; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.app-tube .tube-card-chan { text-align: left; background: none; border: 0; padding: 0; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-tube .tube-card-chan:hover { color: inherit; }
+.app-tube .tube-menu { position: absolute; z-index: 30; top: 40px; right: 6px; min-width: 190px; padding: 6px; border-radius: 12px; background: var(--win-bg-2); border: 1px solid var(--border); box-shadow: 0 12px 32px rgba(0, 0, 0, .35); display: flex; flex-direction: column; }
+.app-tube .tube-watch-main .tube-menu { top: auto; right: auto; }
+.app-tube .tube-menu-title { padding: 6px 8px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.app-tube .tube-menu-item { display: flex; align-items: center; gap: 8px; text-align: left; padding: 8px; border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; font-size: 13.5px; cursor: pointer; }
+.app-tube .tube-menu-item:hover { background: var(--hover, rgba(127, 127, 160, .18)); }
+/* watch page */
+.app-tube .tube-watch { display: flex; gap: 20px; padding: 14px 18px 22px; align-items: flex-start; }
+.app-tube .tube-watch-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; position: relative; }
+.app-tube .tube-media { width: 100%; aspect-ratio: 16 / 9; max-height: 62vh; border-radius: 14px; background: #000; }
+.app-tube .tube-audio { width: 100%; }
+.app-tube .tube-now-title { font-size: 18px; font-weight: 700; line-height: 1.35; }
+.app-tube .tube-now-row { display: flex; align-items: center; gap: 10px; }
+.app-tube .tube-now-chan { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.app-tube .tube-chan-link { text-align: left; background: none; border: 0; padding: 0; color: inherit; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-tube .tube-now-actions { flex-wrap: wrap; }
+.app-tube .tube-desc { white-space: pre-wrap; word-break: break-word; font-size: 13.5px; line-height: 1.5; padding: 12px 14px; border-radius: 12px; background: var(--win-bg-2); max-height: 168px; overflow-y: auto; }
+.app-tube .tube-upnext { flex: none; width: 340px; max-width: 38%; }
+.app-tube .tube-upnext h3 { margin: 2px 0 10px; font-size: 15px; }
+.app-tube .tube-upnext-list { display: flex; flex-direction: column; gap: 10px; }
+.app-tube .tube-upnext-row { position: relative; display: flex; gap: 10px; text-align: left; background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+.app-tube .tube-upnext-thumb { position: relative; flex: none; width: 150px; aspect-ratio: 16 / 9; border-radius: 9px; overflow: hidden; background: #000; }
+.app-tube .tube-upnext-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.app-tube .tube-upnext-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.app-tube .tube-upnext-title { font-size: 13.5px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.app-tube .tube-mini-sel { height: 30px; width: auto; max-width: 128px; border-radius: 8px; font-size: 13px; }
+.app-tube .tube-votes { display: inline-flex; gap: 12px; align-items: center; margin-left: auto; color: var(--muted); font-size: 13px; }
+.app-tube .tube-vote { display: inline-flex; gap: 5px; align-items: center; }
+.app-tube .tube-sub-group { border: 0; background: var(--hover, rgba(127, 127, 160, .16)); color: var(--muted); font: inherit; font-size: 11.5px; padding: 3px 8px; border-radius: 999px; cursor: pointer; }
+.app-tube .tube-sub-group:hover { color: inherit; }
+.app-tube .tube-search-label { align-self: center; }
+.app-tube .tube-tabbar { display: none; }
+/* phones / narrow windows: rail becomes a bottom tab bar, one-column feed */
+@media (max-width: 760px) {
+  .app-tube .tube-top { gap: 8px; padding: 8px 10px; flex-wrap: wrap; }
+  .app-tube .tube-brand { font-size: 15px; }
+  .app-tube .tube-searchbox { order: 3; flex-basis: 100%; max-width: none; }
+  .app-tube .tube-region { margin-left: auto; max-width: 108px; height: 34px; }
+  .app-tube .tube-rail { display: none; }
+  .app-tube .tube-tabbar { display: flex; flex: none; border-top: 1px solid var(--border); padding: 4px 2px calc(4px + env(safe-area-inset-bottom)); background: var(--win-bg); }
+  .app-tube .tube-tab-btn { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 2px; border: 0; border-radius: 10px; background: none; color: inherit; font-size: 10px; cursor: pointer; min-height: 48px; }
+  .app-tube .tube-tab-btn.active { color: #f87171; font-weight: 600; }
+  .app-tube .tube-scroll { padding: 12px 12px 18px; }
+  .app-tube .tube-grid { grid-template-columns: 1fr; gap: 20px; }
+  .app-tube .tube-thumbbtn { border-radius: 10px; }
+  .app-tube .tube-save { opacity: 1; }
+  .app-tube .tube-watch { flex-direction: column; padding: 10px 12px 18px; gap: 14px; }
+  .app-tube .tube-upnext { width: 100%; max-width: none; }
+  .app-tube .tube-media { border-radius: 10px; max-height: none; }
+  .app-tube .tube-now-title { font-size: 16px; }
+}
 .app-announce .speed { display: flex; align-items: center; gap: 10px; }
 .app-announce .speed .range { flex: 1; }
 .app-announce .speed .kicker { flex: none; }

@@ -18,6 +18,7 @@ import './apps/photos.js';
 import './apps/video.js';
 import './apps/torrents.js';
 import './apps/stremio.js';
+import './apps/tube.js';
 
 const app = document.getElementById('app');
 let user = null;

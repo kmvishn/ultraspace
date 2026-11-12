@@ -37,6 +37,7 @@ import (
 	"ultraspace/internal/sysmem"
 	"ultraspace/internal/torrent"
 	"ultraspace/internal/webdl"
+	"ultraspace/internal/youtube"
 	"ultraspace/web"
 )
 
@@ -151,6 +152,9 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 		chatbot.SearchURL = cfg.AI.BraveURL
 	}
 	chatbot.Register(mux, a.Require)
+	yt := youtube.New(log)
+	yt.Enqueue = dl.Enqueue
+	yt.Register(mux, a.Require)
 	if tm != nil {
 		tm.Register(mux, a.Require)
 	} else {

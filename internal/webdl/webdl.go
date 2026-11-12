@@ -46,6 +46,7 @@ type job struct {
 	Error    string  `json:"error,omitempty"`
 	Added    int64   `json:"added"`
 	url      string
+	headers  map[string]string
 	cancel   context.CancelFunc
 	lastHave int64
 }
@@ -112,20 +113,32 @@ func (m *Manager) handleAdd(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSONLimit(w, r, &req, 16<<10) {
 		return
 	}
-	u, err := url.Parse(req.URL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
-		httpx.Error(w, http.StatusBadRequest, "only http and https addresses can be downloaded")
+	id, err := m.Enqueue(req.URL, req.Name, nil)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"id": id})
+}
+
+// Enqueue queues a public http(s) address for download into Files. Other
+// packages (Tube) use it to save streams they resolved themselves; headers,
+// when given, are sent with the fetch (some hosts insist on a client UA).
+func (m *Manager) Enqueue(rawurl, name string, headers map[string]string) (string, error) {
+	u, err := url.Parse(rawurl)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return "", errors.New("only http and https addresses can be downloaded")
 	}
 	var b [8]byte
 	_, _ = rand.Read(b[:])
-	j := &job{ID: hex.EncodeToString(b[:]), Name: cleanName(req.Name), Host: u.Hostname(), Size: -1, State: "queued", Added: time.Now().UnixMilli(), url: u.String()}
+	j := &job{ID: hex.EncodeToString(b[:]), Name: cleanName(name), Host: u.Hostname(), Size: -1,
+		State: "queued", Added: time.Now().UnixMilli(), url: u.String(), headers: headers}
 	m.mu.Lock()
 	m.jobs = append(m.jobs, j)
 	m.trimLocked()
 	m.mu.Unlock()
 	go m.next()
-	httpx.WriteJSON(w, http.StatusOK, map[string]string{"id": j.ID})
+	return j.ID, nil
 }
 
 func (m *Manager) handleList(w http.ResponseWriter, r *http.Request) {
@@ -228,6 +241,9 @@ func (m *Manager) run(ctx context.Context, j *job) error {
 		return err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) ultraspace")
+	for k, v := range j.headers {
+		req.Header.Set(k, v)
+	}
 	res, err := mediasrc.PublicClient().Do(req)
 	if err != nil {
 		return errors.New("could not reach " + j.Host)
