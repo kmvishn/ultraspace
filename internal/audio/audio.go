@@ -77,7 +77,11 @@ type Audio struct {
 	runner      Runner
 	player      *Player
 	mu          sync.RWMutex
+	announce    sync.Mutex
+	listen      sync.Mutex
+	camera      sync.Mutex
 	activeSinks []string
+	findSpeech  func() (string, error) // tests supply a speech program; otherwise espeak-ng
 }
 
 // New creates an Audio service with execRunner and server Player.
@@ -128,6 +132,13 @@ func (a *Audio) Register(mux *http.ServeMux, auth func(http.Handler) http.Handle
 	mux.Handle("POST /api/audio/volume", auth(http.HandlerFunc(a.handleSetVolume)))
 	mux.Handle("POST /api/audio/mute", auth(http.HandlerFunc(a.handleSetMute)))
 	mux.Handle("POST /api/audio/test", auth(http.HandlerFunc(a.handlePlayTestSound)))
+	mux.Handle("GET /api/audio/announce/voices", auth(http.HandlerFunc(a.handleAnnounceVoices)))
+	mux.Handle("GET /api/audio/announce/mics", auth(http.HandlerFunc(a.handleAnnounceMics)))
+	mux.Handle("GET /api/audio/announce/listen", auth(http.HandlerFunc(a.handleAnnounceListen)))
+	mux.Handle("GET /api/audio/announce/cameras", auth(http.HandlerFunc(a.handleAnnounceCameras)))
+	mux.Handle("GET /api/audio/announce/camera", auth(http.HandlerFunc(a.handleAnnounceCamera)))
+	mux.Handle("POST /api/audio/announce/text", auth(http.HandlerFunc(a.handleAnnounceText)))
+	mux.Handle("POST /api/audio/announce/voice", auth(http.HandlerFunc(a.handleAnnounceVoice)))
 
 	// Server-side audio player endpoints
 	mux.Handle("POST /api/audio/player/play", auth(http.HandlerFunc(a.handlePlayerPlay)))
@@ -734,5 +745,3 @@ func (a *Audio) handlePlayerStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.WriteJSON(w, http.StatusOK, st)
 }
-
-

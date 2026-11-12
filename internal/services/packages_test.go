@@ -12,7 +12,7 @@ func TestInspectPackages(t *testing.T) {
 		return path == "/opt/ultraspace/chrome/chrome-headless-shell"
 	})
 	want := map[string]bool{
-		"mpv": true, "pulse": false, "networkmanager": true, "bluetooth": false, "chrome": true, "ffmpeg": false,
+		"mpv": true, "pulse": false, "networkmanager": true, "bluetooth": false, "chrome": true, "ffmpeg": false, "espeak": false,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("len = %d", len(got))

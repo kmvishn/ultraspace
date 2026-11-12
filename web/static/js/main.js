@@ -6,6 +6,7 @@ import { patternPad } from './pattern.js';
 import './apps/files.js';
 import './apps/system.js';
 import './apps/music.js';
+import './apps/announce.js';
 import './apps/settings.js';
 import './apps/editor.js';
 import './apps/viewer.js';

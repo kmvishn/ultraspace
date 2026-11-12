@@ -32,6 +32,7 @@ var releasePackages = []pkgSpec{
 	{id: "bluetooth", name: "Bluetooth", missing: "Pairing speakers and other devices.", bins: []string{"bluetoothctl"}},
 	{id: "chrome", name: "Chrome", missing: "The Browser app.", bins: []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome-headless-shell"}, paths: []string{"/opt/ultraspace/chrome/chrome-headless-shell"}},
 	{id: "ffmpeg", name: "ffmpeg", missing: "Video thumbnails and playback.", bins: []string{"ffmpeg"}},
+	{id: "espeak", name: "eSpeak", missing: "Spoken announcements. Voice recordings still play without it.", bins: []string{"espeak-ng", "espeak"}},
 }
 
 func inspectPackages(look func(string) (string, error), exists func(string) bool) []Package {

@@ -6,7 +6,7 @@
 
 install_dependencies() {
   echo "Installing system dependencies (audio, bluetooth, media, hardware, network)..."
-  deps="ffmpeg mpv pulseaudio pulseaudio-utils pulseaudio-module-bluetooth bluez network-manager pciutils usbutils curl ca-certificates"
+  deps="ffmpeg mpv pulseaudio pulseaudio-utils pulseaudio-module-bluetooth bluez network-manager pciutils usbutils curl ca-certificates espeak-ng"
   apt_install $deps || warn "some packages could not be installed; you may need to install them manually"
 
   # Polkit rule for unprivileged NetworkManager and System Power/Reboot control

@@ -206,7 +206,7 @@ install_dependencies
 
 install -m 755 "$bin" /usr/local/bin/ultraspace
 id ultraspace >/dev/null 2>&1 || useradd --system --home /var/lib/ultraspace --shell /usr/sbin/nologin ultraspace
-usermod -aG bluetooth,audio,netdev,pulse-access,systemd-journal,adm ultraspace || true
+usermod -aG bluetooth,audio,video,netdev,pulse-access,systemd-journal,adm ultraspace || true
 mkdir -p /etc/ultraspace
 
 fresh=0
