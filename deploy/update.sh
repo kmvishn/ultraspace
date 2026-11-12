@@ -37,7 +37,7 @@ apt_install() {
 install_dependencies
 
 if id ultraspace >/dev/null 2>&1; then
-  usermod -aG bluetooth,audio,video,netdev,pulse-access,systemd-journal,adm ultraspace || true
+  usermod -aG "$(host_groups)" ultraspace || true
 else
   warn "no ultraspace user yet; run install.sh for a first install"
 fi

@@ -32,6 +32,7 @@ function mountCode(win) {
     frame?.remove();
     let st;
     try { st = await api('GET', '/api/agent/status'); } catch (err) { fail('Could not reach the server.', err.message); return; }
+    if (st.shell_enabled === false) { fail('Terminal and VS Code are turned off.', 'Turn them on in Settings, under Account.'); return; }
     if (!st.available) { fail('The VS Code service is not running on this server.', 'It is installed with ultraspace as the "ultraspace-agent" service.'); return; }
     if (!st.code_available) { fail('VS Code (code-server) is not installed on this server.'); return; }
     frame = h('iframe', { class: 'code-frame', src: 'code/', title: 'VS Code', allow: 'clipboard-read; clipboard-write; fullscreen' });

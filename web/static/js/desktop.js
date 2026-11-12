@@ -3,7 +3,7 @@ import {
   h, icon, api, on, emit, menu, closeMenu, toast, settings, system, fmtBytes, fmtDuration, debounce, drawChart,
   kindOf, KIND_ICON, dirOf, fileUrl, report, notice, uploadWithProgress,
 } from './core.js';
-import { initWM, allApps, openApp, openFile, windowsOf, focusedWindow, closeAllWindows } from './wm.js';
+import { initWM, allApps, openApp, openFile, windowsOf, focusedWindow, closeAllWindows, setAppHidden } from './wm.js';
 import { stopSession } from './session.js';
 import { startEvents, stopEvents, togglePanel } from './clipboard.js';
 import { startChatbot, stopChatbot } from './chatbot.js';
@@ -116,6 +116,25 @@ export function buildDesktop(user, { onSignOut }) {
   cleanup.push(() => removeEventListener('keydown', onKey));
   cleanup.push(() => { stopSession(); stopEvents(); closeAllWindows(); });
   cleanup.push(initLockScreen(user, onSignOut));
+  // Intercom needs hardware on the server itself. Hide it where there is none.
+  api('GET', '/api/audio/announce/capabilities').then((c) => {
+    if (c && !c.available) setAppHidden('announce', true);
+  }).catch(() => {});
+  // Tell this desktop when a browser it has never seen signs in.
+  const toldAbout = new Set();
+  const checkNewDevices = async () => {
+    try {
+      const { sessions } = await api('GET', '/api/account/sessions');
+      for (const s of sessions || []) {
+        if (!s.is_new || s.current || toldAbout.has(s.id)) continue;
+        toldAbout.add(s.id);
+        toast('New device signed in. Open Settings, Devices, if it was not you.', 'error');
+      }
+    } catch { /* signed out or offline */ }
+  };
+  checkNewDevices();
+  const devTimer = setInterval(checkNewDevices, 60_000);
+  cleanup.push(() => clearInterval(devTimer));
   startEvents();
   startChatbot();
   cleanup.push(() => stopChatbot());
@@ -314,6 +333,7 @@ function buildDock() {
   cleanup.push(() => removeEventListener('resize', onResize));
   render();
   cleanup.push(on('windows', render));
+  cleanup.push(on('apps', render));
   return h('div', { class: 'dock-wrap' }, dockEl);
 }
 

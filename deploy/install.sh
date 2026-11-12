@@ -206,7 +206,7 @@ install_dependencies
 
 install -m 755 "$bin" /usr/local/bin/ultraspace
 id ultraspace >/dev/null 2>&1 || useradd --system --home /var/lib/ultraspace --shell /usr/sbin/nologin ultraspace
-usermod -aG bluetooth,audio,video,netdev,pulse-access,systemd-journal,adm ultraspace || true
+usermod -aG "$(host_groups)" ultraspace || true
 mkdir -p /etc/ultraspace
 
 fresh=0
@@ -299,6 +299,9 @@ if grep -q '^listen = "0.0.0.0' /etc/ultraspace/config.toml; then
   ip=$(hostname -I 2>/dev/null | cut -d' ' -f1)
   echo "Open http://${ip:-<this-machine>}:4600 in a browser on your network."
 else
-  echo "Listening on 127.0.0.1:4600. Put nginx/Caddy with HTTPS in front (see deploy/nginx.conf),"
-  echo "then set public_origin in /etc/ultraspace/config.toml and: sudo systemctl restart ultraspace"
+  echo "Listening on 127.0.0.1:4600. To finish a VPS install:"
+  echo "  1. Point nginx at 127.0.0.1:4600 (see deploy/nginx.conf) and get a certificate (certbot --nginx)."
+  echo "  2. In /etc/ultraspace/config.toml set public_origin to that https address and trust_proxy = true."
+  echo "  3. sudo systemctl restart ultraspace"
+  echo "The microphone, clipboard and media keys only work on that https address."
 fi

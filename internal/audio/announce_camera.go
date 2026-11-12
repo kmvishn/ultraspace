@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"ultraspace/internal/httpx"
 )
@@ -73,6 +74,26 @@ var errNoCamera = errString("choose a camera that is connected")
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// handleAnnounceCapabilities says whether this machine has anything Intercom
+// can use: a speaker, a microphone or a camera. A VPS normally has none.
+func (a *Audio) handleAnnounceCapabilities(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	speakers := 0
+	if st, err := a.GetStatus(ctx); err == nil && st != nil {
+		speakers = len(st.Sinks)
+	}
+	mics := 0
+	if list, err := a.Mics(ctx); err == nil {
+		mics = len(list)
+	}
+	cameras := len(listCameras())
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"speakers": speakers, "microphones": mics, "cameras": cameras,
+		"available": speakers+mics+cameras > 0,
+	})
+}
 
 func (a *Audio) handleAnnounceCameras(w http.ResponseWriter, r *http.Request) {
 	cams := listCameras()

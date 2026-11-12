@@ -24,6 +24,7 @@ type Session struct {
 	LastSeen  time.Time
 	IP        string
 	UserAgent string
+	IsNew     bool // first session for a browser this account has not used before
 }
 
 // State is a per-user JSON document (for example the open windows) and the device that last wrote it.
@@ -61,6 +62,10 @@ CREATE TABLE IF NOT EXISTS user_settings (
 	user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
 	data    TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS server_settings (
+	key   TEXT PRIMARY KEY,
+	value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS user_state (
 	user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 	key         TEXT NOT NULL,
@@ -77,6 +82,7 @@ var sessionColumns = []struct{ name, def string }{
 	{"last_seen", "INTEGER NOT NULL DEFAULT 0"},
 	{"ip", "TEXT NOT NULL DEFAULT ''"},
 	{"user_agent", "TEXT NOT NULL DEFAULT ''"},
+	{"is_new", "INTEGER NOT NULL DEFAULT 0"},
 }
 
 func migrate(db *sql.DB) error {
@@ -223,9 +229,21 @@ func (s *Store) SetPassword(ctx context.Context, userID int64, hash string) erro
 
 func (s *Store) CreateSession(ctx context.Context, tokenHash []byte, userID int64, expires time.Time, ip, userAgent string) error {
 	now := time.Now().Unix()
+	// A browser counts as new when the account already has sessions, but none
+	// from this browser. The first ever sign-in is not flagged.
+	var total, same int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(SUM(user_agent = ?), 0) FROM sessions WHERE user_id = ?`,
+		userAgent, userID).Scan(&total, &same); err != nil {
+		return err
+	}
+	isNew := 0
+	if total > 0 && same == 0 {
+		isNew = 1
+	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_seen, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		tokenHash, userID, now, expires.Unix(), now, ip, userAgent)
+		`INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_seen, ip, user_agent, is_new) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		tokenHash, userID, now, expires.Unix(), now, ip, userAgent, isNew)
 	return err
 }
 
@@ -234,13 +252,14 @@ func (s *Store) SessionUser(ctx context.Context, tokenHash []byte) (User, Sessio
 	var u User
 	var sess Session
 	var userCreated, created, expires, seen int64
+	var isNew int
 	err := s.db.QueryRowContext(ctx,
 		`SELECT u.id, u.username, u.password_hash, u.pattern_hash, u.pin_hash, u.created_at,
-		        s.rowid, s.created_at, s.expires_at, s.last_seen, s.ip, s.user_agent
+		        s.rowid, s.created_at, s.expires_at, s.last_seen, s.ip, s.user_agent, s.is_new
 		   FROM sessions s JOIN users u ON u.id = s.user_id
 		  WHERE s.token_hash = ? AND s.expires_at > ?`, tokenHash, time.Now().Unix()).
 		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.PatternHash, &u.PINHash, &userCreated,
-			&sess.ID, &created, &expires, &seen, &sess.IP, &sess.UserAgent)
+			&sess.ID, &created, &expires, &seen, &sess.IP, &sess.UserAgent, &isNew)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, Session{}, ErrNotFound
 	}
@@ -249,6 +268,7 @@ func (s *Store) SessionUser(ctx context.Context, tokenHash []byte) (User, Sessio
 	}
 	u.CreatedAt = time.Unix(userCreated, 0)
 	sess.UserID = u.ID
+	sess.IsNew = isNew != 0
 	sess.CreatedAt, sess.ExpiresAt, sess.LastSeen = time.Unix(created, 0), time.Unix(expires, 0), time.Unix(seen, 0)
 	return u, sess, nil
 }
@@ -264,7 +284,7 @@ func (s *Store) TouchSession(ctx context.Context, id int64, expires time.Time, i
 // Sessions lists a user's unexpired sessions, most recently active first.
 func (s *Store) Sessions(ctx context.Context, userID int64) ([]Session, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT rowid, created_at, expires_at, last_seen, ip, user_agent FROM sessions
+		`SELECT rowid, created_at, expires_at, last_seen, ip, user_agent, is_new FROM sessions
 		  WHERE user_id = ? AND expires_at > ? ORDER BY last_seen DESC`, userID, time.Now().Unix())
 	if err != nil {
 		return nil, err
@@ -274,14 +294,49 @@ func (s *Store) Sessions(ctx context.Context, userID int64) ([]Session, error) {
 	for rows.Next() {
 		var sess Session
 		var created, expires, seen int64
-		if err := rows.Scan(&sess.ID, &created, &expires, &seen, &sess.IP, &sess.UserAgent); err != nil {
+		var isNew int
+		if err := rows.Scan(&sess.ID, &created, &expires, &seen, &sess.IP, &sess.UserAgent, &isNew); err != nil {
 			return nil, err
 		}
 		sess.UserID = userID
+		sess.IsNew = isNew != 0
 		sess.CreatedAt, sess.ExpiresAt, sess.LastSeen = time.Unix(created, 0), time.Unix(expires, 0), time.Unix(seen, 0)
 		out = append(out, sess)
 	}
 	return out, rows.Err()
+}
+
+// MarkSessionsSeen clears the new-device flag, for one session or all of them.
+func (s *Store) MarkSessionsSeen(ctx context.Context, userID, id int64) error {
+	if id > 0 {
+		_, err := s.db.ExecContext(ctx, `UPDATE sessions SET is_new = 0 WHERE rowid = ? AND user_id = ?`, id, userID)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET is_new = 0 WHERE user_id = ?`, userID)
+	return err
+}
+
+// ServerSetting returns a server-wide setting, such as whether the shell is on.
+func (s *Store) ServerSetting(ctx context.Context, key string) (string, bool, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM server_settings WHERE key = ?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return v, err == nil, err
+}
+
+func (s *Store) SetServerSetting(ctx context.Context, key, value string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO server_settings (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
+	return err
+}
+
+// BackupTo writes a consistent copy of the database to path (SQLite VACUUM INTO).
+func (s *Store) BackupTo(ctx context.Context, path string) error {
+	_, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, path)
+	return err
 }
 
 // DeleteSessionByID removes one of the user's sessions. It reports ErrNotFound if there was none.

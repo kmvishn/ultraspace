@@ -111,6 +111,9 @@ func (a *Auth) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/account/settings", a.Require(http.HandlerFunc(a.handleGetSettings)))
 	mux.Handle("PUT /api/account/settings", a.Require(http.HandlerFunc(a.handlePutSettings)))
 	mux.Handle("GET /api/account/sessions", a.Require(http.HandlerFunc(a.handleSessions)))
+	mux.Handle("POST /api/account/sessions/seen", a.Require(http.HandlerFunc(a.handleSessionsSeen)))
+	mux.Handle("GET /api/account/shell", a.Require(http.HandlerFunc(a.handleShell)))
+	mux.Handle("POST /api/account/shell", a.Require(http.HandlerFunc(a.handleSetShell)))
 	a.registerPattern(mux)
 	a.registerPIN(mux)
 	mux.Handle("POST /api/account/sessions/revoke", a.Require(http.HandlerFunc(a.handleRevoke)))
@@ -129,10 +132,66 @@ func (a *Auth) handleSessions(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"id": s.ID, "current": s.ID == cur.ID, "created": s.CreatedAt.UnixMilli(),
 			"last_seen": s.LastSeen.UnixMilli(), "expires": s.ExpiresAt.UnixMilli(),
-			"ip": s.IP, "user_agent": s.UserAgent,
+			"ip": s.IP, "user_agent": s.UserAgent, "is_new": s.IsNew,
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"sessions": out})
+}
+
+func (a *Auth) handleSessionsSeen(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID int64 `json:"id"`
+	}
+	if !httpx.DecodeJSON(w, r, &req) {
+		return
+	}
+	u, _ := UserFrom(r.Context())
+	if err := a.store.MarkSessionsSeen(r.Context(), u.ID, req.ID); err != nil {
+		a.internal(w, "mark sessions seen", err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// ShellEnabled is the server-wide Terminal and VS Code switch (on unless turned off).
+func (a *Auth) ShellEnabled(ctx context.Context) bool {
+	v, ok, err := a.store.ServerSetting(ctx, "shell_enabled")
+	return err != nil || !ok || v != "0"
+}
+
+func (a *Auth) handleShell(w http.ResponseWriter, r *http.Request) {
+	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"enabled": a.ShellEnabled(r.Context())})
+}
+
+func (a *Auth) handleSetShell(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool   `json:"enabled"`
+		Current string `json:"current"`
+	}
+	if !httpx.DecodeJSON(w, r, &req) {
+		return
+	}
+	u, _ := UserFrom(r.Context())
+	ip := a.opts.Proxy.ClientIP(r)
+	if !a.limiter.allowed(ip) {
+		httpx.Error(w, http.StatusTooManyRequests, "too many attempts; try again later")
+		return
+	}
+	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Current)) != nil {
+		a.limiter.fail(ip)
+		httpx.Error(w, http.StatusForbidden, "current password is incorrect")
+		return
+	}
+	v := "0"
+	if req.Enabled {
+		v = "1"
+	}
+	if err := a.store.SetServerSetting(r.Context(), "shell_enabled", v); err != nil {
+		a.internal(w, "save shell switch", err)
+		return
+	}
+	a.opts.Log.Info("shell switch", "user", u.Username, "enabled", req.Enabled)
+	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true, "enabled": req.Enabled})
 }
 
 // handleRevoke signs out one session ({"id": n}) or every other one ({"others": true}).

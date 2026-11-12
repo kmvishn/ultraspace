@@ -11,9 +11,19 @@ const MENUBAR = 32;
 const DOCK = 86;
 const isMobile = () => innerWidth < 760;
 
+// Apps the server cannot use (no hardware for them) are hidden from the dock
+// and the launcher, and cannot be opened.
+const hiddenApps = new Set();
+export function setAppHidden(id, hidden) {
+  if (hiddenApps.has(id) === hidden) return;
+  if (hidden) hiddenApps.add(id); else hiddenApps.delete(id);
+  emit('apps');
+}
+export const isAppHidden = (id) => hiddenApps.has(id);
+
 // def: { id, name, icon, color: [from, to], width, height, single, dock, mount(win, args) -> { onArgs, onClose, onFocus } }
 export function registerApp(def) { apps.set(def.id, { single: true, dock: true, width: 860, height: 560, ...def }); }
-export const allApps = () => [...apps.values()];
+export const allApps = () => [...apps.values()].filter((a) => !hiddenApps.has(a.id));
 export const appById = (id) => apps.get(id);
 export const windowsOf = (id) => windows.filter((w) => w.app.id === id);
 export const focusedWindow = () => windows.find((w) => w.focused) || null;
@@ -32,7 +42,7 @@ export function closeAllWindows() {
 // opts.geom restores a saved window: { x, y, w, h, max, snap, min }.
 export function openApp(id, args = {}, opts = {}) {
   const app = apps.get(id);
-  if (!app) return null;
+  if (!app || hiddenApps.has(id)) return null;
   closeMenu();
   if (app.single && !opts.geom) {
     const existing = windows.find((w) => w.app.id === id);

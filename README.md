@@ -606,6 +606,27 @@ sudo certbot --nginx -d ultraspace.example.com
 The nginx site passes WebSocket upgrades, disables buffering (for uploads and streams) and allows large uploads.
 Open ports 80 and 443 in your firewall (on some clouds, both the host's own firewall and the provider's network rules).
 
+Then tell ultraspace about the address it is now on, and restart it:
+
+```toml
+# /etc/ultraspace/config.toml
+listen        = "127.0.0.1:4600"
+public_origin = "https://ultraspace.example.com"
+trust_proxy   = true
+```
+
+```sh
+sudo systemctl restart ultraspace
+```
+
+The microphone (Intercom recordings), the shared clipboard and media keys only work on that
+`https://` address; browsers do not offer them on a plain `http://` one.
+
+The install scripts notice a cloud VM and skip what it cannot use: no PulseAudio, Bluetooth,
+NetworkManager, eSpeak or hotspot setup, only `ffmpeg`, `curl` and certificates. Set
+`ULTRASPACE_HOST=home` or `ULTRASPACE_HOST=vps` when a machine looks like the other kind
+(a home server that is itself a VM, or rented bare metal).
+
 ### 4. Server browser (optional)
 
 `install.sh` does this step if you answer yes (or pass `--browser`).

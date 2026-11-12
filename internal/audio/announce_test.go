@@ -129,6 +129,15 @@ func TestAnnounceVoice(t *testing.T) {
 	}
 }
 
+func TestAnnounceCapabilities(t *testing.T) {
+	a, _ := announceAudio(t)
+	rec := httptest.NewRecorder()
+	a.handleAnnounceCapabilities(rec, httptest.NewRequest(http.MethodGet, "/api/audio/announce/capabilities", nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"available":true`) || !strings.Contains(rec.Body.String(), `"speakers":`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestParseVoicesKeepsNamedVariants(t *testing.T) {
 	got := parseVoices([]byte("Pty Language Age/Gender VoiceName File\n" +
 		" 5  en --/M English gmw/en\n" +

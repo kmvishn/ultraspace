@@ -136,6 +136,7 @@ func (a *Audio) Register(mux *http.ServeMux, auth func(http.Handler) http.Handle
 	mux.Handle("GET /api/audio/announce/mics", auth(http.HandlerFunc(a.handleAnnounceMics)))
 	mux.Handle("GET /api/audio/announce/listen", auth(http.HandlerFunc(a.handleAnnounceListen)))
 	mux.Handle("GET /api/audio/announce/cameras", auth(http.HandlerFunc(a.handleAnnounceCameras)))
+	mux.Handle("GET /api/audio/announce/capabilities", auth(http.HandlerFunc(a.handleAnnounceCapabilities)))
 	mux.Handle("GET /api/audio/announce/camera", auth(http.HandlerFunc(a.handleAnnounceCamera)))
 	mux.Handle("POST /api/audio/announce/text", auth(http.HandlerFunc(a.handleAnnounceText)))
 	mux.Handle("POST /api/audio/announce/voice", auth(http.HandlerFunc(a.handleAnnounceVoice)))

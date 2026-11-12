@@ -127,6 +127,7 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 
 	mux := http.NewServeMux()
 	a.Register(mux)
+	registerAccountExtra(mux, st, a, version)
 	fm.Register(mux, a.Require)
 	mon.Register(mux, a.Require)
 	services.New(log).Register(mux, a.Require)
@@ -157,7 +158,13 @@ func New(ctx context.Context, cfg config.Config, version string, log *slog.Logge
 			httpx.Error(w, http.StatusNotImplemented, "the torrent client is turned off in the server's config")
 		})))
 	}
-	agent.NewClient(cfg.AgentSocket, proxy, cfg.PublicOrigin).Register(mux, a.Require)
+	agentClient := agent.NewClient(cfg.AgentSocket, proxy, cfg.PublicOrigin)
+	agentClient.Gate = func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		return a.ShellEnabled(ctx)
+	}
+	agentClient.Register(mux, a.Require)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": version})
 	})

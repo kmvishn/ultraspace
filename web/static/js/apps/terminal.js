@@ -61,6 +61,10 @@ function mountTerminal(win, args) {
     try {
       await loadXterm();
       const st = await api('GET', '/api/agent/status');
+      if (st.shell_enabled === false) {
+        showEmpty('Terminal and VS Code are turned off.', 'Turn them on in Settings, under Account.');
+        return;
+      }
       if (!st.available) {
         showEmpty('The terminal service is not running on this server.', 'It is installed with ultraspace as the "ultraspace-agent" service.');
         return;

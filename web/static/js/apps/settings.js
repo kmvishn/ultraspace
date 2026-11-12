@@ -1015,6 +1015,8 @@ function mountSettings(win, args) {
       group('Password', 'Changing your password signs out every other device.', form),
       pinGroup(),
       patternGroup(),
+      shellGroup(),
+      backupGroup(),
       lockscreenSettingsGroup()));
     return on('settings', () => account(el));
   }
@@ -1260,11 +1262,19 @@ function mountSettings(win, args) {
           return h('div', { class: `device ${s.current ? 'current' : ''}` },
             h('span', { class: 'device-icon' }, icon(mobile ? 'smartphone' : 'laptop', 20)),
             h('div', { class: 'device-text' },
-              h('div', { class: 'device-name' }, s.user_agent ? deviceName(s.user_agent) : 'Unknown device', s.current ? h('span', { class: 'pill active' }, 'This device') : null),
+              h('div', { class: 'device-name' }, s.user_agent ? deviceName(s.user_agent) : 'Unknown device',
+                s.current ? h('span', { class: 'pill active' }, 'This device') : null,
+                s.is_new && !s.current ? h('span', { class: 'pill active' }, 'New') : null),
               h('div', { class: 'set-desc' }, [s.ip, s.current ? 'active now' : s.last_seen ? `active ${fmtAgo(s.last_seen)}` : '', `signed in ${fmtDate(s.created)}`].filter(Boolean).join(' · '))),
+            s.is_new && !s.current ? h('button', { class: 'btn small', onclick: () => dismissNew(s) }, 'Dismiss') : null,
             s.current ? null : h('button', { class: 'btn small', onclick: () => revoke(s) }, 'Sign out'));
         }));
       } catch (err) { report(err); }
+    }
+
+    async function dismissNew(s) {
+      try { await api('POST', '/api/account/sessions/seen', { id: s.id }); } catch (err) { report(err); }
+      load();
     }
 
     async function revoke(s) {
@@ -1291,6 +1301,89 @@ function mountSettings(win, args) {
     load();
     timer = setInterval(load, 30_000);
     return () => clearInterval(timer);
+  }
+
+  // ---------- Terminal and VS Code switch ----------
+
+  function shellGroup() {
+    const box = h('div', null, h('div', { class: 'empty-state small' }, 'Loading…'));
+    async function load() {
+      try {
+        const st = await api('GET', '/api/account/shell');
+        const sw = h('input', {
+          type: 'checkbox', class: 'switch', checked: !!st.enabled,
+          onchange: () => confirmShell(!st.enabled),
+        });
+        box.replaceChildren(h('label', { class: 'switch-row' },
+          h('span', null, h('b', null, st.enabled ? 'Terminal and VS Code are on' : 'Terminal and VS Code are off'),
+            h('span', { class: 'set-desc' }, 'They run as a Linux user on this server. Anyone who can sign in can use them while they are on.')),
+          sw));
+      } catch (err) { report(err); }
+    }
+    function confirmShell(enabled) {
+      const pwd = h('input', { class: 'input', type: 'password', placeholder: 'Your current password', autocomplete: 'current-password' });
+      const msg = h('div', { class: 'form-error' });
+      const ok = h('button', {
+        class: 'btn primary',
+        onclick: async () => {
+          try {
+            await api('POST', '/api/account/shell', { enabled, current: pwd.value });
+            close();
+            toast(enabled ? 'Terminal and VS Code are on' : 'Terminal and VS Code are off');
+            load();
+          } catch (err) { msg.textContent = err.message; }
+        },
+      }, enabled ? 'Turn on' : 'Turn off');
+      pwd.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok.click(); });
+      const close = dialog({
+        title: enabled ? 'Turn on Terminal and VS Code?' : 'Turn off Terminal and VS Code?', width: '360px',
+        body: h('div', { class: 'set-form' },
+          h('p', { class: 'dialog-text' }, enabled
+            ? 'Anyone who can sign in to ultraspace will be able to open a shell on this server.'
+            : 'New Terminal and VS Code sessions will be refused. Sessions already running keep going.'),
+          pwd, msg),
+        actions: [h('button', { class: 'btn', onclick: () => { close(); load(); } }, 'Cancel'), ok],
+      });
+      setTimeout(() => pwd.focus(), 50);
+    }
+    load();
+    return group('Terminal and VS Code', 'A server-wide switch. Turning it off does not stop shells that are already running.', box);
+  }
+
+  // ---------- Backup ----------
+
+  function backupGroup() {
+    const pwd = h('input', { class: 'input', type: 'password', placeholder: 'Your current password', autocomplete: 'current-password' });
+    const msg = h('div', { class: 'form-error' });
+    const btn = h('button', {
+      class: 'btn', type: 'button',
+      onclick: async () => {
+        msg.textContent = '';
+        btn.disabled = true;
+        try {
+          const res = await fetch('/api/account/backup', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'X-Ultraspace': '1', 'Content-Type': 'application/json' },
+            body: JSON.stringify({ current: pwd.value }),
+          });
+          if (!res.ok) {
+            const data = await res.json().catch(() => null);
+            throw new Error((data && data.error) || 'Backup failed');
+          }
+          const blob = await res.blob();
+          const a = h('a', { href: URL.createObjectURL(blob), download: 'ultraspace-backup.zip' });
+          document.body.append(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+          pwd.value = '';
+          toast('Backup downloaded');
+        } catch (err) { msg.textContent = err.message; }
+        btn.disabled = false;
+      },
+    }, icon('download', 15), 'Download backup');
+    return group('Backup', 'Your accounts, settings and saved windows, as one zip file. Your files are not included.',
+      h('div', { class: 'set-form' }, h('label', { class: 'field-label' }, 'Current password'), pwd, msg, btn));
   }
 
   // ---------- Ultra Chat Bot ----------
@@ -1425,10 +1518,31 @@ function mountSettings(win, args) {
       ].flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v)]));
     };
     render(system.latest);
+
+    const updateBox = h('div', null, h('div', { class: 'empty-state small' }, 'Checking for a newer release…'));
+    api('GET', '/api/system/version-check').then((v) => {
+      if (v.error || !v.latest) {
+        updateBox.replaceChildren(h('p', { class: 'set-desc' }, `Running ultraspace ${v.current}. The release check did not answer.`));
+      } else if (!/^v?\d+\.\d+\.\d+/.test(v.current)) {
+        updateBox.replaceChildren(h('p', { class: 'set-desc' }, `Running ultraspace ${v.current}, which is not a release build. The latest release is ${v.latest}.`));
+      } else if (v.update_available) {
+        updateBox.replaceChildren(
+          h('p', null, h('b', null, `ultraspace ${v.latest} is available.`), ` You are running ${v.current}.`),
+          v.notes ? h('p', { class: 'set-desc' }, v.notes) : null,
+          h('p', { class: 'set-desc' }, 'Updating is still a command on the server: run update.sh from the new release, or make update from a checkout.'),
+          v.url ? h('a', { class: 'btn', href: v.url, target: '_blank', rel: 'noopener' }, 'Release notes') : null);
+      } else {
+        updateBox.replaceChildren(h('p', { class: 'set-desc' }, `ultraspace ${v.current} is the latest release.`));
+      }
+    }).catch(() => {
+      updateBox.replaceChildren(h('p', { class: 'set-desc' }, 'The release check did not answer.'));
+    });
+
     el.replaceChildren(h('div', { class: 'settings-page' },
       h('div', { class: 'about-hero' }, h('span', { class: 'logo-mark big' }),
         h('div', null, h('div', { class: 'about-name' }, 'ultraspace'), h('div', { class: 'set-desc' }, 'Your personal server, in one small Go binary.'))),
       group('Server & Power Controls', 'Manage host system power, reboot, or restart the Ultraspace daemon.', powerBox),
+      group('Updates', null, updateBox),
       group('This server', null, kv)));
     return on('system', render);
   }

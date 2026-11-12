@@ -23,7 +23,11 @@ type Client struct {
 	public string
 	rp     *httputil.ReverseProxy
 	http   *http.Client
+	// Gate, when set, reports whether Terminal and VS Code are allowed.
+	Gate func() bool
 }
+
+func (c *Client) enabled() bool { return c.Gate == nil || c.Gate() }
 
 func NewClient(sock string, proxy httpx.Proxy, publicOrigin string) *Client {
 	c := &Client{sock: sock, proxy: proxy, public: publicOrigin}
@@ -67,14 +71,29 @@ func NewClient(sock string, proxy httpx.Proxy, publicOrigin string) *Client {
 
 func (c *Client) Register(mux *http.ServeMux, require func(http.Handler) http.Handler) {
 	mux.Handle("GET /api/agent/status", require(http.HandlerFunc(c.status)))
-	mux.Handle("/api/term/", require(c.sameOrigin(c.rp)))
-	mux.Handle("/code/", require(c.sameOrigin(c.rp)))
+	mux.Handle("/api/term/", require(c.gate(c.sameOrigin(c.rp))))
+	mux.Handle("/code/", require(c.gate(c.sameOrigin(c.rp))))
+}
+
+// gate refuses new Terminal and VS Code traffic while the shell is turned off.
+func (c *Client) gate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !c.enabled() {
+			httpx.Error(w, http.StatusForbidden, "Terminal and VS Code are turned off in Settings")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (c *Client) status(w http.ResponseWriter, r *http.Request) {
+	if !c.enabled() {
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"available": false, "shell_enabled": false})
+		return
+	}
 	res, err := c.http.Get("http://agent/status")
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"available": false})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"available": false, "shell_enabled": true})
 		return
 	}
 	defer res.Body.Close()
@@ -83,6 +102,7 @@ func (c *Client) status(w http.ResponseWriter, r *http.Request) {
 		out = map[string]any{}
 	}
 	out["available"] = true
+	out["shell_enabled"] = true
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 

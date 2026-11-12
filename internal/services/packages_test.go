@@ -10,7 +10,7 @@ func TestInspectPackages(t *testing.T) {
 		return "", osErr
 	}, func(path string) bool {
 		return path == "/opt/ultraspace/chrome/chrome-headless-shell"
-	})
+	}, false)
 	want := map[string]bool{
 		"mpv": true, "pulse": false, "networkmanager": true, "bluetooth": false, "chrome": true, "ffmpeg": false, "espeak": false,
 	}
@@ -26,6 +26,19 @@ func TestInspectPackages(t *testing.T) {
 		}
 		if !p.Present && p.Detail == "" {
 			t.Errorf("%s missing without an explanation", p.ID)
+		}
+	}
+}
+
+func TestInspectPackagesVPS(t *testing.T) {
+	got := inspectPackages(func(name string) (string, error) { return "", osErr },
+		func(path string) bool { return false }, true)
+	if len(got) != 2 {
+		t.Fatalf("vps packages = %v", got)
+	}
+	for _, p := range got {
+		if p.ID != "chrome" && p.ID != "ffmpeg" {
+			t.Fatalf("unexpected VPS package %s", p.ID)
 		}
 	}
 }
