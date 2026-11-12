@@ -304,6 +304,11 @@ function mountAnnounce(win) {
       return;
     }
     if (!picked.size || busy) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      msg.textContent = 'Open this page on localhost or HTTPS to use this browser’s microphone.';
+      toast(msg.textContent, 'error');
+      return;
+    }
     let media;
     try {
       media = await navigator.mediaDevices.getUserMedia({ audio: true });

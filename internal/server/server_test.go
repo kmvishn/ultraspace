@@ -298,7 +298,7 @@ func TestSystemAndStatic(t *testing.T) {
 	if res.StatusCode != 200 || !strings.Contains(string(body), "js/main.js") || res.Header.Get("Content-Security-Policy") == "" {
 		t.Fatalf("index = %d csp=%q", res.StatusCode, res.Header.Get("Content-Security-Policy"))
 	}
-	if res.Header.Get("Permissions-Policy") == "" || res.Header.Get("Cross-Origin-Resource-Policy") != "same-origin" {
+	if !strings.Contains(res.Header.Get("Permissions-Policy"), "microphone=(self)") || res.Header.Get("Cross-Origin-Resource-Policy") != "same-origin" {
 		t.Fatalf("missing security headers: perm=%q corp=%q", res.Header.Get("Permissions-Policy"), res.Header.Get("Cross-Origin-Resource-Policy"))
 	}
 }
