@@ -4,7 +4,7 @@
 // Google account, no API key, nothing tracked. Subscriptions, playlists,
 // history and the region follow the user between devices through the
 // server's per-user state; nothing is stored with Google.
-import { h, icon, api, toast, report, ask, confirmDialog } from '../core.js';
+import { h, icon, api, toast, report, ask, confirmDialog, menu, fmtClock } from '../core.js';
 import { registerApp } from '../wm.js';
 import { device } from '../session.js';
 
@@ -77,41 +77,107 @@ function mountTube(win) {
   const grid = h('div', { class: 'tube-grid' });
   const scroll = h('div', { class: 'tube-scroll' }, heading, status, chips, shortsShelf, grid);
 
-  // ---- player ----
-  const video = h('video', { class: 'tube-media', controls: true, playsinline: true });
-  const audio = h('audio', { class: 'tube-audio hidden', controls: true });
-  const nowTitle = h('div', { class: 'tube-now-title' });
-  const nowMeta = h('div', { class: 'set-desc' });
+  // ---- player elements ----
+  const video = h('video', { class: 'tube-video', playsinline: true, preload: 'metadata' });
+  try { video.volume = Number(localStorage.getItem('us.tube.volume') ?? 1); } catch { /* default */ }
+  const spinner = h('div', { class: 'tube-spinner hidden' }, h('span', { class: 'bw-spin big' }));
+  const flash = h('div', { class: 'tube-flash' });
+
+  // Audio mode visual card
+  const audioThumbBlur = h('div', { class: 'tube-audiocard-blur' });
+  const audioThumbImg = h('img', { class: 'tube-audiocard-thumb', alt: '' });
+  const audioCardTitle = h('div', { class: 'tube-audiocard-title' });
+  const audioCardChan = h('div', { class: 'tube-audiocard-chan' });
+  const audioCardBadge = h('div', { class: 'tube-audiocard-badge' }, icon('music', 13), 'Audio mode · Screen off saving');
+  const audioCard = h('div', { class: 'tube-audiocard hidden' },
+    audioThumbBlur,
+    h('div', { class: 'tube-audiocard-body' },
+      audioThumbImg,
+      audioCardTitle,
+      audioCardChan,
+      audioCardBadge));
+
+  // Custom Seekbar
+  const played = h('div', { class: 'tube-seek-played' });
+  const buffered = h('div', { class: 'tube-seek-buffered' });
+  const segmentsBox = h('div', { class: 'tube-seek-segments' });
+  const hoverTime = h('div', { class: 'tube-seek-hover hidden' });
+  const seekbar = h('div', { class: 'tube-seek', role: 'slider', 'aria-label': 'Seek', tabindex: '0' },
+    h('div', { class: 'tube-seek-track' }, buffered, segmentsBox, played),
+    hoverTime);
+
+  // Controls bar
+  const timeEl = h('span', { class: 'tube-ctrl-time' }, '0:00 / 0:00');
+  const prevBtn = h('button', { class: 'tube-ctrl-btn', type: 'button', title: 'Previous (P)' }, icon('skipBack', 18));
+  const playBtn = h('button', { class: 'tube-ctrl-btn tube-play-btn', type: 'button', title: 'Play (Space)' }, icon('play', 20));
+  const nextBtn = h('button', { class: 'tube-ctrl-btn', type: 'button', title: 'Next (N)' }, icon('skipForward', 18));
+  const volBtn = h('button', { class: 'tube-ctrl-btn', type: 'button', title: 'Mute (M)' }, icon('volume', 18));
+  const vol = h('input', { type: 'range', class: 'range tube-vol', min: '0', max: '100', value: String(Math.round(video.volume * 100)), 'aria-label': 'Volume' });
+
+  const watchPill = h('button', { class: 'tube-ctrl-pill active', type: 'button', title: 'Video mode' }, icon('film', 13), 'Watch');
+  const listenPill = h('button', { class: 'tube-ctrl-pill', type: 'button', title: 'Audio-only mode' }, icon('music', 13), 'Listen');
+  const speedBtn = h('button', { class: 'tube-ctrl-pill', type: 'button', title: 'Playback speed' }, '1×');
+  const qualBtn = h('button', { class: 'tube-ctrl-pill hidden', type: 'button', title: 'Video quality' }, 'Auto');
+  const pipBtn = h('button', { class: 'tube-ctrl-btn', type: 'button', title: 'Picture in picture' }, icon('pip', 17));
+  const fsBtn = h('button', { class: 'tube-ctrl-btn', type: 'button', title: 'Full screen (F)' }, icon('maximize', 17));
+
+  const controls = h('div', { class: 'tube-controls' },
+    seekbar,
+    h('div', { class: 'tube-ctrl-row' },
+      prevBtn, playBtn, nextBtn,
+      volBtn, vol, timeEl,
+      h('span', { class: 'tb-spacer' }),
+      watchPill, listenPill,
+      speedBtn, qualBtn, pipBtn, fsBtn));
+
+  const stage = h('div', { class: 'tube-stage', tabindex: '0' },
+    video, audioCard, spinner, flash, controls);
+
+  // Watch Header (Back button + context breadcrumb)
+  const backBtn = h('button', { class: 'btn small tube-back-btn', type: 'button' }, icon('chevronLeft', 15), 'Back');
+  const watchCrumb = h('span', { class: 'tube-watch-breadcrumb' }, 'Now playing');
+  const watchHeader = h('div', { class: 'tube-watch-header' }, backBtn, watchCrumb);
+
+  // Now Playing Creator Row & Actions
+  const nowTitle = h('h2', { class: 'tube-now-title' });
   const nowChannel = h('button', { type: 'button', class: 'tube-chan-link' });
-  const subBtn = h('button', { class: 'btn small', type: 'button' });
-  const watchBtn = h('button', { class: 'btn small', type: 'button' }, icon('film', 14), 'Watch');
-  const listenBtn = h('button', { class: 'btn small', type: 'button' }, icon('music', 14), 'Listen');
-  const saveBtn = h('button', { class: 'btn small', type: 'button' }, icon('bookmark', 14), 'Save');
-  const prevBtn = h('button', { class: 'btn small', type: 'button', title: 'Previous in queue' }, icon('skipBack', 14));
-  const nextBtn = h('button', { class: 'btn small', type: 'button', title: 'Next in queue' }, icon('skipForward', 14));
-  const votesEl = h('span', { class: 'tube-votes' });
-  const qualitySel = h('select', { class: 'input tube-mini-sel', 'aria-label': 'Quality', title: 'Quality' },
-    h('option', { value: '' }, 'Auto quality'));
-  const speedSel = h('select', { class: 'input tube-mini-sel', 'aria-label': 'Playback speed', title: 'Playback speed' },
-    ...[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((s) =>
-      h('option', { value: String(s) }, s === 1 ? '1× speed' : `${s}×`)));
-  const pipBtn = h('button', { class: 'btn small', type: 'button', title: 'Picture in picture' }, icon('pip', 14));
-  const dlBtn = h('button', { class: 'btn small', type: 'button', title: 'Download into Files' }, icon('download', 14), 'Download');
-  const sbBtn = h('button', { class: 'btn small', type: 'button', title: 'Skip sponsor segments (SponsorBlock)' });
-  const desc = h('div', { class: 'tube-desc' });
+  const nowSubDesc = h('span', { class: 'set-desc' });
+  const avatarEl = h('span', { class: 'tube-avatar-lg' }, '?');
+  const subBtn = h('button', { class: 'btn small primary', type: 'button' });
+  const votesEl = h('div', { class: 'tube-votes-pill' });
+  const saveBtn = h('button', { class: 'tube-action-pill', type: 'button' }, icon('bookmark', 14), 'Save');
+  const dlBtn = h('button', { class: 'tube-action-pill', type: 'button' }, icon('download', 14), 'Download');
+  const sbBtn = h('button', { class: 'tube-action-pill', type: 'button' }, icon('shield', 14), 'SponsorBlock');
+
+  const nowRow = h('div', { class: 'tube-now-row' },
+    h('div', { class: 'tube-now-creator' },
+      avatarEl,
+      h('div', { class: 'tube-now-chan' }, nowChannel, nowSubDesc),
+      subBtn),
+    h('div', { class: 'tube-now-actions' },
+      votesEl, saveBtn, dlBtn, sbBtn));
+
+  // Description Card
+  const nowMeta = h('div', { class: 'tube-desc-header' });
+  const descText = h('div', { class: 'tube-desc-text clamped' });
+  const descMoreBtn = h('button', { class: 'tube-desc-more', type: 'button' }, 'Show more');
+  const descCard = h('div', { class: 'tube-desc-card hidden' }, nowMeta, descText, descMoreBtn);
+
+  // Up Next / Queue
+  const upNextTitle = h('h3', null, 'Up next');
+  const upNextBadge = h('span', { class: 'tube-upnext-badge hidden' });
+  const upNextHeader = h('div', { class: 'tube-upnext-header' }, upNextTitle, upNextBadge);
   const upNext = h('div', { class: 'tube-upnext-list' });
+  const aside = h('aside', { class: 'tube-upnext' }, upNextHeader, upNext);
+
   const watchView = h('div', { class: 'tube-watch hidden' },
     h('div', { class: 'tube-watch-main' },
-      video, audio,
+      watchHeader,
+      stage,
       nowTitle,
-      h('div', { class: 'tube-now-row' },
-        h('span', { class: 'tube-avatar tube-avatar-lg' }, '?'),
-        h('div', { class: 'tube-now-chan' }, nowChannel, nowMeta),
-        subBtn),
-      h('div', { class: 'row tube-now-actions' }, watchBtn, listenBtn, saveBtn, prevBtn, nextBtn,
-        qualitySel, speedSel, pipBtn, dlBtn, sbBtn, votesEl),
-      desc),
-    h('aside', { class: 'tube-upnext' }, h('h3', null, 'Up next'), upNext));
+      nowRow,
+      descCard),
+    aside);
 
   const content = h('div', { class: 'tube-content' }, scroll, watchView);
 
@@ -157,30 +223,40 @@ function mountTube(win) {
   const region = () => regionSel.value || 'US';
   const subscribed = (id) => !!id && data.subscriptions.some((s) => s.id === id);
 
+  let selectedHeight = '';
+  let currentHeights = [];
   function streamURL() {
     let u = `/api/youtube/stream?id=${encodeURIComponent(current.id)}&mode=${mode}`;
-    if (mode === 'video' && qualitySel.value) u += `&h=${qualitySel.value}`;
+    if (mode === 'video' && selectedHeight) u += `&h=${selectedHeight}`;
     return u;
   }
 
   function setMode(next) {
     if (!current) return;
-    const from = mode === 'video' ? video : audio;
-    const t = Math.max(from.currentTime || 0, startAt);
-    const wasPlaying = !from.paused && !from.ended;
+    const t = Math.max(video.currentTime || 0, startAt);
+    const wasPlaying = !video.paused && !video.ended;
     mode = next;
-    video.classList.toggle('hidden', mode !== 'video');
-    audio.classList.toggle('hidden', mode !== 'audio');
-    watchBtn.classList.toggle('primary', mode === 'video');
-    listenBtn.classList.toggle('primary', mode === 'audio');
-    const el = mode === 'video' ? video : audio;
-    el.src = streamURL();
-    el.playbackRate = Number(data.speed) || 1;
-    el.addEventListener('loadedmetadata', () => {
-      el.playbackRate = Number(data.speed) || 1;
-      if (t > 0) el.currentTime = t;
+    watchPill.classList.toggle('active', mode === 'video');
+    listenPill.classList.toggle('active', mode === 'audio');
+    video.classList.toggle('tube-media-audio', mode === 'audio');
+    audioCard.classList.toggle('hidden', mode !== 'audio');
+    stage.classList.toggle('tube-audio-mode', mode === 'audio');
+    if (mode === 'audio') {
+      const thumb = `/api/youtube/thumb?id=${encodeURIComponent(current.id)}`;
+      audioThumbBlur.style.backgroundImage = `url("${thumb}")`;
+      audioThumbImg.src = thumb;
+      audioCardTitle.textContent = current.title;
+      audioCardChan.textContent = current.channel || '';
+    }
+    video.src = streamURL();
+    video.playbackRate = Number(data.speed) || 1;
+    video.addEventListener('loadedmetadata', () => {
+      video.playbackRate = Number(data.speed) || 1;
+      if (t > 0) video.currentTime = t;
       startAt = 0;
-      if (wasPlaying) el.play().catch(() => {});
+      renderSegments();
+      paint();
+      if (wasPlaying) video.play().catch(() => {});
     }, { once: true });
   }
 
@@ -188,6 +264,20 @@ function mountTube(win) {
     data.history = [entry, ...data.history.filter((e) => e.id !== entry.id)].slice(0, 60);
     persist();
   }
+
+  function closeWatch() {
+    watchView.classList.add('hidden');
+    scroll.classList.remove('hidden');
+    win.setTitle('Tube');
+  }
+  backBtn.onclick = () => closeWatch();
+
+  let descExpanded = false;
+  descMoreBtn.onclick = () => {
+    descExpanded = !descExpanded;
+    descText.classList.toggle('clamped', !descExpanded);
+    descMoreBtn.textContent = descExpanded ? 'Show less' : 'Show more';
+  };
 
   function play(entry, list) {
     current = clean(entry);
@@ -202,23 +292,28 @@ function mountTube(win) {
     segments = [];
     startAt = (!current.live && data.positions?.[current.id]) || 0;
     votesEl.replaceChildren();
-    qualitySel.replaceChildren(h('option', { value: '' }, 'Auto quality'));
+    selectedHeight = '';
+    currentHeights = [];
+    qualBtn.textContent = 'Auto';
+    qualBtn.classList.add('hidden');
     scroll.classList.add('hidden');
     watchView.classList.remove('hidden');
-    watchView.classList.toggle('tube-watch-shorts', current.kind === 'short');
+    stage.classList.toggle('tube-shorts-stage', current.kind === 'short');
+    watchCrumb.textContent = queue.length > 1 ? `Playing from queue (${queueIndex + 1}/${queue.length})` : 'Now playing';
     nowTitle.textContent = current.title;
     nowMeta.textContent = [current.views, current.published].filter(Boolean).join(' · ');
     nowChannel.textContent = current.channel || '';
+    nowSubDesc.textContent = '';
     nowChannel.onclick = () => { if (current.channel_id) openChannel(current.channel_id, current.channel); };
-    root.querySelector('.tube-avatar-lg').textContent = (current.channel || '?').trim().charAt(0).toUpperCase() || '?';
-    desc.textContent = '';
-    desc.classList.add('hidden');
+    avatarEl.textContent = (current.channel || '?').trim().charAt(0).toUpperCase() || '?';
+    descText.textContent = '';
+    descCard.classList.add('hidden');
     refreshSubBtn();
     saveBtn.onclick = (e) => openSaveMenu(current, e.currentTarget);
     prevBtn.disabled = queueIndex <= 0;
     nextBtn.disabled = queueIndex >= queue.length - 1;
     setMode(mode);
-    (mode === 'video' ? video : audio).play().catch(() => {});
+    video.play().catch(() => {});
     win.setTitle(current.title.slice(0, 60));
     loadWatchExtras(current);
   }
@@ -244,47 +339,73 @@ function mountTube(win) {
       }
       if (info.views) nowMeta.textContent = [`${Number(info.views).toLocaleString()} views`, current.published].filter(Boolean).join(' · ');
       if (info.description) {
-        desc.textContent = info.description;
-        desc.classList.remove('hidden');
+        descText.textContent = info.description;
+        descExpanded = false;
+        descText.classList.add('clamped');
+        descMoreBtn.textContent = 'Show more';
+        descCard.classList.remove('hidden');
       }
       if ((res.heights || []).length > 1) {
-        qualitySel.replaceChildren(h('option', { value: '' }, 'Auto quality'),
-          ...res.heights.map((ht) => h('option', { value: String(ht) }, `${ht}p`)));
-      } else if ((res.heights || []).length === 1) {
-        qualitySel.replaceChildren(h('option', { value: '' }, `Auto · ${res.heights[0]}p`));
+        currentHeights = res.heights;
+        qualBtn.classList.remove('hidden');
+        qualBtn.textContent = selectedHeight ? `${selectedHeight}p` : 'Auto';
+      } else {
+        currentHeights = [];
+        qualBtn.classList.add('hidden');
       }
     } catch { /* playback still works without details */ }
     try {
       const v = await api('GET', `/api/youtube/votes?id=${encodeURIComponent(entry.id)}`);
       if (!current || current.id !== entry.id) return;
       votesEl.replaceChildren(
-        h('span', { class: 'tube-vote' }, icon('thumbsUp', 14), fmtCount(v.likes)),
-        h('span', { class: 'tube-vote' }, icon('thumbsDown', 14), fmtCount(v.dislikes)));
+        h('button', { class: 'tube-vote-btn', type: 'button' }, icon('thumbsUp', 14), fmtCount(v.likes)),
+        h('span', { class: 'tube-vote-sep' }),
+        h('button', { class: 'tube-vote-btn', type: 'button' }, icon('thumbsDown', 14), fmtCount(v.dislikes)));
     } catch { /* counts are a bonus, not a requirement */ }
     if (data.sponsorblock) {
       try {
         const sb = await api('GET', `/api/youtube/sponsorblock?id=${encodeURIComponent(entry.id)}`);
-        if (current && current.id === entry.id) segments = sb.segments || [];
+        if (current && current.id === entry.id) {
+          segments = sb.segments || [];
+          renderSegments();
+        }
       } catch { segments = []; }
     }
     try {
       const res = await api('GET', `/api/youtube/related?id=${encodeURIComponent(entry.id)}`);
       if (!current || current.id !== entry.id) return;
-      renderUpNext((res.results || []).map(clean));
+      renderUpNext(queue.length > 1 ? queue : (res.results || []).map(clean));
     } catch {
-      if (current && current.id === entry.id) upNext.replaceChildren();
+      if (current && current.id === entry.id) {
+        if (queue.length > 1) renderUpNext(queue);
+        else upNext.replaceChildren();
+      }
     }
   }
 
   function renderUpNext(list) {
-    upNext.replaceChildren(...list.map((r) =>
-      h('button', { type: 'button', class: 'tube-upnext-row', onclick: () => play(r, list) },
+    if (queue.length > 1) {
+      upNextTitle.textContent = 'Queue';
+      upNextBadge.textContent = `${queueIndex + 1} / ${queue.length}`;
+      upNextBadge.classList.remove('hidden');
+    } else {
+      upNextTitle.textContent = 'Up next';
+      upNextBadge.classList.add('hidden');
+    }
+    upNext.replaceChildren(...list.map((r) => {
+      const isCur = current && r.id === current.id;
+      return h('button', {
+        type: 'button',
+        class: `tube-upnext-row ${isCur ? 'active' : ''}`,
+        onclick: () => play(r, list),
+      },
         h('span', { class: 'tube-upnext-thumb' },
           h('img', { src: `/api/youtube/thumb?id=${encodeURIComponent(r.id)}`, alt: '', loading: 'lazy' }),
           r.live ? h('span', { class: 'tube-dur tube-live-badge' }, 'LIVE') : (r.duration ? h('span', { class: 'tube-dur' }, r.duration) : null)),
         h('span', { class: 'tube-upnext-meta' },
           h('span', { class: 'tube-upnext-title' }, r.title),
-          h('span', { class: 'set-desc' }, [r.channel, r.views, r.published].filter(Boolean).join(' · '))))));
+          h('span', { class: 'set-desc' }, [r.channel, r.views, r.published].filter(Boolean).join(' · '))));
+    }));
   }
 
   function playStep(delta) {
@@ -292,50 +413,251 @@ function mountTube(win) {
     if (next < 0 || next >= queue.length) return;
     play(queue[next], queue);
   }
-  prevBtn.onclick = () => playStep(-1);
-  nextBtn.onclick = () => playStep(1);
-  for (const el of [video, audio]) el.addEventListener('ended', () => playStep(1));
-  watchBtn.onclick = () => setMode('video');
-  listenBtn.onclick = () => setMode('audio');
+  prevBtn.onclick = (e) => { e.stopPropagation(); playStep(-1); };
+  nextBtn.onclick = (e) => { e.stopPropagation(); playStep(1); };
+  video.addEventListener('ended', () => playStep(1));
+  watchPill.onclick = (e) => { e.stopPropagation(); setMode('video'); };
+  listenPill.onclick = (e) => { e.stopPropagation(); setMode('audio'); };
 
-  // SponsorBlock: step over flagged segments; keep a resume position.
-  let lastPosSave = 0;
-  for (const el of [video, audio]) {
-    el.addEventListener('timeupdate', () => {
-      if (!current || el !== (mode === 'video' ? video : audio)) return;
-      const t = el.currentTime;
-      if (data.sponsorblock) {
-        for (const s of segments) {
-          if (t >= s.segment[0] && t < s.segment[1] - 0.3) {
-            el.currentTime = s.segment[1];
-            toast(`Skipped ${s.category === 'music_offtopic' ? 'non-music' : s.category}`);
-            break;
-          }
-        }
+  // Controls auto-hide
+  let hideTimer = null;
+  function pokeControls() {
+    stage.classList.remove('idle');
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      if (!video.paused && !controls.matches(':hover')) {
+        stage.classList.add('idle');
       }
-      const now = Date.now();
-      if (now - lastPosSave > 5000 && el.duration > 30) {
-        lastPosSave = now;
-        if (t > 5 && t < el.duration - 15) data.positions[current.id] = Math.floor(t);
-        else if (t >= el.duration - 15) delete data.positions[current.id];
-        persist();
-      }
-    });
+    }, 2600);
+  }
+  stage.addEventListener('pointermove', pokeControls);
+
+  function togglePlay() {
+    if (video.paused) {
+      video.play().catch(report);
+      showFlash('play');
+    } else {
+      video.pause();
+      showFlash('pause');
+    }
   }
 
-  speedSel.value = String(data.speed || 1);
-  speedSel.onchange = () => {
-    data.speed = Number(speedSel.value) || 1;
-    for (const el of [video, audio]) el.playbackRate = data.speed;
-    persist();
+  function showFlash(ic) {
+    flash.replaceChildren(icon(ic, 28));
+    flash.classList.remove('on');
+    void flash.offsetWidth;
+    flash.classList.add('on');
+  }
+
+  playBtn.onclick = (e) => { e.stopPropagation(); togglePlay(); };
+  stage.onclick = (e) => {
+    if (e.target.closest('.tube-controls, .tube-seek, button, select, input')) return;
+    if (matchMedia('(pointer: coarse)').matches && stage.classList.contains('idle')) {
+      pokeControls();
+      return;
+    }
+    togglePlay();
   };
-  qualitySel.onchange = () => { if (current && mode === 'video') setMode('video'); };
-  pipBtn.onclick = async () => {
+  stage.ondblclick = (e) => {
+    if (e.target.closest('.tube-controls, .tube-seek, button, select, input')) return;
+    fullscreen();
+  };
+
+  function fullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+      return;
+    }
+    if (stage.requestFullscreen) stage.requestFullscreen().catch(() => video.webkitEnterFullscreen?.());
+    else video.webkitEnterFullscreen?.();
+  }
+  fsBtn.onclick = (e) => { e.stopPropagation(); fullscreen(); };
+
+  function showVol() {
+    volBtn.replaceChildren(icon(video.muted || video.volume === 0 ? 'volumeX' : 'volume', 18));
+    vol.value = String(Math.round((video.muted ? 0 : video.volume) * 100));
+  }
+  volBtn.onclick = (e) => {
+    e.stopPropagation();
+    video.muted = !video.muted;
+    showVol();
+  };
+  vol.oninput = (e) => {
+    e.stopPropagation();
+    video.volume = Number(vol.value) / 100;
+    video.muted = false;
+    try { localStorage.setItem('us.tube.volume', String(video.volume)); } catch {}
+    showVol();
+  };
+  showVol();
+
+  // Custom Seekbar logic
+  const pct = (t) => {
+    const d = video.duration || 0;
+    return d > 0 ? `${Math.min(100, (100 * t) / d)}%` : '0%';
+  };
+
+  function paint() {
+    const t = video.currentTime || 0;
+    const d = video.duration || 0;
+    if (d > 0) {
+      played.style.width = pct(t);
+      let end = 0;
+      for (let i = 0; i < video.buffered.length; i++) {
+        if (video.buffered.start(i) <= t + 1) end = Math.max(end, video.buffered.end(i));
+      }
+      buffered.style.width = pct(end);
+      timeEl.textContent = `${fmtClock(t)} / ${fmtClock(d)}`;
+    } else {
+      timeEl.textContent = current?.live ? 'LIVE' : `${fmtClock(t)}`;
+    }
+  }
+
+  function renderSegments() {
+    segmentsBox.replaceChildren();
+    const d = video.duration || 0;
+    if (!d || !segments.length) return;
+    for (const s of segments) {
+      const start = s.segment[0];
+      const end = s.segment[1];
+      const segEl = h('div', { class: 'tube-seek-segment' });
+      segEl.style.left = `${(start / d) * 100}%`;
+      segEl.style.width = `${Math.max(0.5, ((end - start) / d) * 100)}%`;
+      segmentsBox.append(segEl);
+    }
+  }
+
+  const atPointer = (e) => {
+    const r = seekbar.getBoundingClientRect();
+    const d = video.duration || 0;
+    return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * d;
+  };
+
+  seekbar.addEventListener('pointermove', (e) => {
+    const d = video.duration || 0;
+    if (!d) return;
+    const t = atPointer(e);
+    hoverTime.textContent = fmtClock(t);
+    hoverTime.style.left = `${(100 * t) / d}%`;
+    hoverTime.classList.remove('hidden');
+  });
+
+  seekbar.addEventListener('pointerleave', () => hoverTime.classList.add('hidden'));
+
+  seekbar.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    seekbar.setPointerCapture(e.pointerId);
+    hoverTime.classList.remove('hidden');
+    const move = (ev) => {
+      const t = atPointer(ev);
+      const d = video.duration || 0;
+      if (d) played.style.width = `${(100 * t) / d}%`;
+      hoverTime.textContent = fmtClock(t);
+      hoverTime.style.left = `${d ? (100 * t) / d : 0}%`;
+    };
+    const up = (ev) => {
+      seekbar.removeEventListener('pointermove', move);
+      seekbar.removeEventListener('pointerup', up);
+      hoverTime.classList.add('hidden');
+      const t = atPointer(ev);
+      if (Number.isFinite(t)) video.currentTime = t;
+    };
+    seekbar.addEventListener('pointermove', move);
+    seekbar.addEventListener('pointerup', up);
+    move(e);
+  });
+
+  // SponsorBlock & playback tracking
+  let lastPosSave = 0;
+  video.addEventListener('timeupdate', () => {
+    paint();
+    if (!current) return;
+    const t = video.currentTime;
+    if (data.sponsorblock && segments.length) {
+      for (const s of segments) {
+        if (t >= s.segment[0] && t < s.segment[1] - 0.3) {
+          video.currentTime = s.segment[1];
+          toast(`Skipped ${s.category === 'music_offtopic' ? 'non-music' : s.category}`);
+          break;
+        }
+      }
+    }
+    const now = Date.now();
+    if (now - lastPosSave > 5000 && video.duration > 30) {
+      lastPosSave = now;
+      if (t > 5 && t < video.duration - 15) data.positions[current.id] = Math.floor(t);
+      else if (t >= video.duration - 15) delete data.positions[current.id];
+      persist();
+    }
+  });
+
+  video.addEventListener('progress', paint);
+  video.addEventListener('waiting', () => spinner.classList.remove('hidden'));
+  video.addEventListener('playing', () => spinner.classList.add('hidden'));
+  video.addEventListener('canplay', () => spinner.classList.add('hidden'));
+  video.addEventListener('play', () => {
+    playBtn.replaceChildren(icon('pause', 20));
+    playBtn.title = 'Pause (Space)';
+    stage.classList.remove('paused');
+    pokeControls();
+  });
+  video.addEventListener('pause', () => {
+    playBtn.replaceChildren(icon('play', 20));
+    playBtn.title = 'Play (Space)';
+    stage.classList.add('paused');
+    stage.classList.remove('idle');
+  });
+
+  const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+  speedBtn.onclick = (e) => {
+    e.stopPropagation();
+    const r = speedBtn.getBoundingClientRect();
+    menu(r.left, r.top - 8, SPEEDS.map((s) => ({
+      label: `${s}×`,
+      icon: (Number(data.speed) || 1) === s ? 'check' : null,
+      action: () => {
+        data.speed = s;
+        video.playbackRate = s;
+        speedBtn.textContent = `${s}×`;
+        persist();
+      },
+    })));
+  };
+
+  qualBtn.onclick = (e) => {
+    e.stopPropagation();
+    const r = qualBtn.getBoundingClientRect();
+    const items = [
+      {
+        label: 'Auto',
+        icon: !selectedHeight ? 'check' : null,
+        action: () => {
+          selectedHeight = '';
+          qualBtn.textContent = 'Auto';
+          if (mode === 'video') setMode('video');
+        },
+      },
+      ...currentHeights.map((ht) => ({
+        label: `${ht}p`,
+        icon: selectedHeight === String(ht) ? 'check' : null,
+        action: () => {
+          selectedHeight = String(ht);
+          qualBtn.textContent = `${ht}p`;
+          if (mode === 'video') setMode('video');
+        },
+      })),
+    ];
+    menu(r.left, r.top - 8, items);
+  };
+
+  pipBtn.onclick = async (e) => {
+    e.stopPropagation();
     try {
       if (document.pictureInPictureElement) await document.exitPictureInPicture();
       else if (mode === 'video') await video.requestPictureInPicture();
     } catch { toast('Picture in picture is not available here.'); }
   };
+
   dlBtn.onclick = async () => {
     if (!current) return;
     dlBtn.disabled = true;
@@ -347,15 +669,17 @@ function mountTube(win) {
     }
     dlBtn.disabled = false;
   };
+
   function refreshSbBtn() {
-    sbBtn.textContent = `SponsorBlock ${data.sponsorblock ? 'on' : 'off'}`;
-    sbBtn.classList.toggle('primary', !!data.sponsorblock);
+    sbBtn.classList.toggle('active', !!data.sponsorblock);
+    sbBtn.title = `Skip sponsor segments (${data.sponsorblock ? 'ON' : 'OFF'})`;
   }
   sbBtn.onclick = () => {
     data.sponsorblock = !data.sponsorblock;
     if (!data.sponsorblock) segments = [];
     persist();
     refreshSbBtn();
+    renderSegments();
   };
   refreshSbBtn();
 
@@ -369,6 +693,21 @@ function mountTube(win) {
       refreshSubBtn();
     };
   }
+
+  win.body.addEventListener('keydown', (e) => {
+    if (e.target.closest('input, textarea, select')) return;
+    if (watchView.classList.contains('hidden')) return;
+    const k = e.key.toLowerCase();
+    if (k === ' ' || k === 'k') { e.preventDefault(); togglePlay(); }
+    else if (k === 'arrowleft' || k === 'j') { e.preventDefault(); video.currentTime = Math.max(0, video.currentTime - 5); }
+    else if (k === 'arrowright' || k === 'l') { e.preventDefault(); video.currentTime = Math.min(video.duration || 0, video.currentTime + 5); }
+    else if (k === 'arrowup') { e.preventDefault(); video.volume = Math.min(1, video.volume + 0.1); video.muted = false; showVol(); }
+    else if (k === 'arrowdown') { e.preventDefault(); video.volume = Math.max(0, video.volume - 0.1); showVol(); }
+    else if (k === 'm') { e.preventDefault(); video.muted = !video.muted; showVol(); }
+    else if (k === 'f') { e.preventDefault(); fullscreen(); }
+    else if (k === 'p') { e.preventDefault(); playStep(-1); }
+    else if (k === 'n') { e.preventDefault(); playStep(1); }
+  });
 
   function toggleSubscribe(ch) {
     if (subscribed(ch.id)) {
@@ -848,7 +1187,7 @@ function mountTube(win) {
 
   loadState().then(() => {
     regionSel.value = data.region || 'US';
-    speedSel.value = String(data.speed || 1);
+    speedBtn.textContent = `${Number(data.speed) || 1}×`;
     refreshSbBtn();
     showHome();
   });
@@ -857,9 +1196,15 @@ function mountTube(win) {
   return {
     onDestroy() {
       clearTimeout(saveTimer);
-      for (const el of [video, audio]) {
-        try { el.pause(); el.removeAttribute('src'); el.load(); } catch { /* already gone */ }
-      }
+      clearTimeout(hideTimer);
+      try {
+        video.pause();
+        if (document.pictureInPictureElement === video) {
+          document.exitPictureInPicture().catch(() => {});
+        }
+        video.removeAttribute('src');
+        video.load();
+      } catch { /* already gone */ }
     },
     saveState: () => ({}),
   };
