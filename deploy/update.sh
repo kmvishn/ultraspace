@@ -54,6 +54,7 @@ fi
 
 if [ -n "$bin" ]; then
   [ -f "$bin" ] || die "no binary at $bin"
+  chmod +x "$bin" 2>/dev/null || true
   "$bin" -version >/dev/null 2>&1 || die "this binary does not run here (wrong architecture? uname -m says $(uname -m))"
   install -m 755 "$bin" /usr/local/bin/ultraspace
 fi
