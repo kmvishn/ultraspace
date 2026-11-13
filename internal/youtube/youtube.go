@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -298,6 +299,7 @@ func (c *Client) Playlist(ctx context.Context, ref string) (*PlaylistInfo, error
 	if !ok {
 		return nil, errors.New("that does not look like a playlist link")
 	}
+	id = strings.TrimPrefix(id, "VL")
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	raw, err := c.post(ctx, "browse", webClient("US"), map[string]any{"browseId": "VL" + id})
@@ -313,9 +315,45 @@ func (c *Client) Playlist(ctx context.Context, ref string) (*PlaylistInfo, error
 		walkRenderers(root, "playlistHeaderRenderer", func(m map[string]any) {
 			if out.Title == "" {
 				out.Title = simpleText(m["title"])
+			}
+			if out.Count == "" {
 				out.Count = runsText(m["numVideosText"])
 			}
 		})
+		walkRenderers(root, "playlistSidebarPrimaryInfoRenderer", func(m map[string]any) {
+			if out.Title == "" {
+				out.Title = simpleText(m["title"])
+			}
+			if out.Count == "" {
+				if stats, ok := m["stats"].([]any); ok && len(stats) > 0 {
+					out.Count = runsText(stats[0])
+				}
+			}
+		})
+		walkRenderers(root, "pageHeaderViewModel", func(m map[string]any) {
+			if out.Title == "" {
+				if title := mapAt(m, "title", "dynamicTextViewModel", "text"); title != nil {
+					out.Title, _ = title["content"].(string)
+				}
+			}
+		})
+		walkRenderers(root, "playlistMetadataRenderer", func(m map[string]any) {
+			if out.Title == "" {
+				if t, ok := m["title"].(string); ok {
+					out.Title = t
+				}
+			}
+		})
+		walkRenderers(root, "microformatDataRenderer", func(m map[string]any) {
+			if out.Title == "" {
+				if t, ok := m["title"].(string); ok {
+					out.Title = t
+				}
+			}
+		})
+	}
+	if out.Count == "" && len(out.Results) > 0 {
+		out.Count = fmt.Sprintf("%d videos", len(out.Results))
 	}
 	return out, nil
 }
@@ -432,6 +470,24 @@ func parseSearch(raw []byte) []Result {
 		case map[string]any:
 			if vr, ok := t["videoRenderer"].(map[string]any); ok {
 				if r, ok := readRenderer(vr); ok && !seen[r.Kind+r.ID] {
+					seen[r.Kind+r.ID] = true
+					out = append(out, r)
+				}
+			}
+			if pvr, ok := t["playlistVideoRenderer"].(map[string]any); ok {
+				if r, ok := readRenderer(pvr); ok && !seen[r.Kind+r.ID] {
+					seen[r.Kind+r.ID] = true
+					out = append(out, r)
+				}
+			}
+			if cvr, ok := t["compactVideoRenderer"].(map[string]any); ok {
+				if r, ok := readRenderer(cvr); ok && !seen[r.Kind+r.ID] {
+					seen[r.Kind+r.ID] = true
+					out = append(out, r)
+				}
+			}
+			if ppvr, ok := t["playlistPanelVideoRenderer"].(map[string]any); ok {
+				if r, ok := readRenderer(ppvr); ok && !seen[r.Kind+r.ID] {
 					seen[r.Kind+r.ID] = true
 					out = append(out, r)
 				}
@@ -619,25 +675,57 @@ func sliceOf(v any) []any {
 }
 
 func readRenderer(vr map[string]any) (Result, bool) {
+	if playable, ok := vr["isPlayable"].(bool); ok && !playable {
+		return Result{}, false
+	}
 	id, _ := vr["videoId"].(string)
 	if !validID(id) {
 		return Result{}, false
 	}
 	r := Result{ID: id, Kind: "video", Title: runsText(vr["title"]), Duration: simpleText(vr["lengthText"]),
 		Views: simpleText(vr["viewCountText"]), Published: simpleText(vr["publishedTimeText"])}
+	if r.Title == "[Private video]" || r.Title == "[Deleted video]" {
+		return Result{}, false
+	}
 	if nav, ok := vr["navigationEndpoint"].(map[string]any); ok {
 		if _, isShort := nav["reelWatchEndpoint"]; isShort {
 			r.Kind = "short"
 		}
 	}
 	if byline, ok := vr["shortBylineText"].(map[string]any); ok {
+		if r.Channel == "" {
+			r.Channel = simpleText(byline)
+		}
 		if runs, ok := byline["runs"].([]any); ok && len(runs) > 0 {
 			if first, ok := runs[0].(map[string]any); ok {
-				r.Channel, _ = first["text"].(string)
+				if r.Channel == "" {
+					r.Channel, _ = first["text"].(string)
+				}
 				if nav, ok := first["navigationEndpoint"].(map[string]any); ok {
 					if browse, ok := nav["browseEndpoint"].(map[string]any); ok {
 						r.ChannelID, _ = browse["browseId"].(string)
 					}
+				}
+			}
+		}
+	}
+	if r.Duration == "" {
+		if secStr, ok := vr["lengthSeconds"].(string); ok && secStr != "" {
+			if sec, err := strconv.Atoi(secStr); err == nil && sec > 0 {
+				r.Duration = formatDuration(sec)
+			}
+		}
+	}
+	if r.Views == "" {
+		if vi, ok := vr["videoInfo"].(map[string]any); ok {
+			s := runsText(vi)
+			parts := strings.Split(s, "•")
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if strings.Contains(p, "view") {
+					r.Views = p
+				} else if strings.Contains(p, "ago") {
+					r.Published = p
 				}
 			}
 		}
@@ -651,19 +739,28 @@ func readRenderer(vr map[string]any) (Result, bool) {
 			}
 		}
 	}
-	if _, ok := vr["lengthText"]; !ok {
-		// No length usually means a live stream.
-		if overlays, ok := vr["thumbnailOverlays"].([]any); ok {
-			for _, o := range overlays {
-				if s, ok := o.(map[string]any)["thumbnailOverlayTimeStatusRenderer"].(map[string]any); ok {
-					if style, _ := s["style"].(string); style == "LIVE" {
-						r.Live = true
-					}
+	if overlays, ok := vr["thumbnailOverlays"].([]any); ok {
+		for _, o := range overlays {
+			if s, ok := o.(map[string]any)["thumbnailOverlayTimeStatusRenderer"].(map[string]any); ok {
+				if style, _ := s["style"].(string); style == "LIVE" {
+					r.Live = true
+				} else if r.Duration == "" {
+					r.Duration = simpleText(s["text"])
 				}
 			}
 		}
 	}
 	return r, r.Title != ""
+}
+
+func formatDuration(sec int) string {
+	h := sec / 3600
+	m := (sec % 3600) / 60
+	s := sec % 60
+	if h > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
+	}
+	return fmt.Sprintf("%d:%02d", m, s)
 }
 
 func runsText(v any) string {

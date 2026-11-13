@@ -701,25 +701,43 @@ function mountTube(win) {
     if (!p) { showPlaylists(); return; }
     view = 'playlist';
     beginLoad(p.name);
-    chips.replaceChildren(
-      h('button', { class: 'btn small', type: 'button', onclick: showPlaylists }, icon('chevronLeft', 14), 'All playlists'),
-      h('button', {
-        class: 'btn small primary', type: 'button', disabled: !p.videos.length,
-        onclick: () => { if (p.videos.length) play(p.videos[0], p.videos); },
-      }, icon('play', 13), 'Play all'),
-      ...(p.yt ? [h('button', {
-        class: 'btn small', type: 'button',
-        onclick: async () => {
-          status.textContent = 'Refreshing…';
-          try {
-            const info = await api('GET', `/api/youtube/playlist?id=${encodeURIComponent(p.yt)}`);
-            p.videos = (info.results || []).map(clean);
-            if (info.title) p.name = info.title;
-            persist();
-            openPlaylist(p.id);
-          } catch (err) { status.textContent = err.message || 'Refresh failed.'; }
-        },
-      }, icon('history', 13), 'Refresh')] : []));
+    const renderButtons = () => {
+      chips.replaceChildren(
+        h('button', { class: 'btn small', type: 'button', onclick: showPlaylists }, icon('chevronLeft', 14), 'All playlists'),
+        h('button', {
+          class: 'btn small primary', type: 'button', disabled: !p.videos.length,
+          onclick: () => { if (p.videos.length) play(p.videos[0], p.videos); },
+        }, icon('play', 13), 'Play all'),
+        ...(p.yt ? [h('button', {
+          class: 'btn small', type: 'button',
+          onclick: async () => {
+            status.textContent = 'Refreshing…';
+            try {
+              const info = await api('GET', `/api/youtube/playlist?id=${encodeURIComponent(p.yt)}`);
+              p.videos = (info.results || []).map(clean);
+              if (info.title) p.name = info.title;
+              persist();
+              openPlaylist(p.id);
+            } catch (err) { status.textContent = err.message || 'Refresh failed.'; }
+          },
+        }, icon('history', 13), 'Refresh')] : []));
+    };
+    renderButtons();
+    if (p.yt && (!p.videos || !p.videos.length)) {
+      status.textContent = 'Loading playlist…';
+      api('GET', `/api/youtube/playlist?id=${encodeURIComponent(p.yt)}`).then((info) => {
+        if (view !== 'playlist') return;
+        p.videos = (info.results || []).map(clean);
+        if (info.title) { p.name = info.title; heading.textContent = info.title; }
+        persist();
+        renderButtons();
+        renderGrid(p.videos, 'This playlist is empty.');
+      }).catch((err) => {
+        if (view !== 'playlist') return;
+        status.textContent = err.message || 'Could not load playlist.';
+      });
+      return;
+    }
     renderGrid(p.videos, 'This playlist is empty. Save videos with the bookmark button.');
   }
 

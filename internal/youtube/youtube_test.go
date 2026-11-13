@@ -162,3 +162,116 @@ func TestParsePlayerRefusesUnplayable(t *testing.T) {
 		t.Fatal("accepted an unplayable response")
 	}
 }
+
+const playlistFixture = `{
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [{
+        "tabRenderer": {
+          "content": {
+            "sectionListRenderer": {
+              "contents": [{
+                "itemSectionRenderer": {
+                  "contents": [{
+                    "playlistVideoListRenderer": {
+                      "contents": [
+                        {
+                          "playlistVideoRenderer": {
+                            "videoId": "vidOne12345",
+                            "title": {"runs": [{"text": "First Playlist Track"}]},
+                            "shortBylineText": {
+                              "runs": [{
+                                "text": "Music Artist",
+                                "navigationEndpoint": {
+                                  "browseEndpoint": {"browseId": "UCartist123"}
+                                }
+                              }]
+                            },
+                            "lengthSeconds": "215",
+                            "isPlayable": true,
+                            "videoInfo": {"runs": [{"text": "50K views"}, {"text": " • "}, {"text": "1 year ago"}]}
+                          }
+                        },
+                        {
+                          "playlistVideoRenderer": {
+                            "videoId": "vidTwo67890",
+                            "title": {"simpleText": "Second Playlist Track"},
+                            "shortBylineText": {"simpleText": "Another Artist"},
+                            "lengthText": {"simpleText": "4:20"},
+                            "isPlayable": true
+                          }
+                        },
+                        {
+                          "playlistVideoRenderer": {
+                            "videoId": "vidUnplayabl",
+                            "title": {"runs": [{"text": "Private Track"}]},
+                            "isPlayable": false
+                          }
+                        },
+                        {
+                          "playlistVideoRenderer": {
+                            "videoId": "vidDeleted12",
+                            "title": {"simpleText": "[Deleted video]"}
+                          }
+                        },
+                        {
+                          "compactVideoRenderer": {
+                            "videoId": "vidThree345",
+                            "title": {"simpleText": "Compact Track"},
+                            "shortBylineText": {"simpleText": "Compact Artist"},
+                            "lengthText": {"simpleText": "2:30"}
+                          }
+                        }
+                      ]
+                    }
+                  }]
+                }
+              }]
+            }
+          }
+        }
+      }]
+    }
+  }
+}`
+
+func TestParsePlaylistVideos(t *testing.T) {
+	got := parseSearch([]byte(playlistFixture))
+	if len(got) != 3 {
+		t.Fatalf("expected 3 valid tracks, got %d: %+v", len(got), got)
+	}
+	t1 := got[0]
+	if t1.ID != "vidOne12345" || t1.Title != "First Playlist Track" || t1.Channel != "Music Artist" ||
+		t1.ChannelID != "UCartist123" || t1.Duration != "3:35" || t1.Views != "50K views" || t1.Published != "1 year ago" {
+		t.Fatalf("t1 = %+v", t1)
+	}
+	t2 := got[1]
+	if t2.ID != "vidTwo67890" || t2.Title != "Second Playlist Track" || t2.Channel != "Another Artist" ||
+		t2.Duration != "4:20" {
+		t.Fatalf("t2 = %+v", t2)
+	}
+	t3 := got[2]
+	if t3.ID != "vidThree345" || t3.Title != "Compact Track" || t3.Channel != "Compact Artist" ||
+		t3.Duration != "2:30" {
+		t.Fatalf("t3 = %+v", t3)
+	}
+}
+
+func TestFormatDuration(t *testing.T) {
+	cases := []struct {
+		sec  int
+		want string
+	}{
+		{0, "0:00"},
+		{5, "0:05"},
+		{65, "1:05"},
+		{215, "3:35"},
+		{3600, "1:00:00"},
+		{3665, "1:01:05"},
+	}
+	for _, c := range cases {
+		if got := formatDuration(c.sec); got != c.want {
+			t.Errorf("formatDuration(%d) = %q, want %q", c.sec, got, c.want)
+		}
+	}
+}
