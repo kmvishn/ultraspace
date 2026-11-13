@@ -23,12 +23,13 @@ const REGIONS = [
   ['AR', 'Argentina'],
 ];
 
-const CATEGORIES = ['Music', 'Live', 'Gaming', 'News', 'Movies', 'Technology', 'Sports',
+const CATEGORIES = ['Shorts', 'Music', 'Live', 'Gaming', 'News', 'Movies', 'Technology', 'Sports',
   'Comedy', 'Podcasts', 'Cooking', 'Travel', 'Science', 'Fitness', 'Cars'];
 
 const clean = (r) => ({
-  id: r.id, title: r.title || '', channel: r.channel || '', channel_id: r.channel_id || '',
-  duration: r.duration || '', views: r.views || '', published: r.published || '', live: !!r.live,
+  id: r.id, kind: r.kind || 'video', title: r.title || '', channel: r.channel || '',
+  channel_id: r.channel_id || '', duration: r.duration || '', views: r.views || '',
+  published: r.published || '', live: !!r.live, count: r.count || '', thumb: r.thumb || '',
 });
 
 function mountTube(win) {
@@ -72,8 +73,9 @@ function mountTube(win) {
   const heading = h('h2', { class: 'tube-heading' });
   const status = h('p', { class: 'msg tube-status' });
   const chips = h('div', { class: 'tube-chips' });
+  const shortsShelf = h('div', { class: 'tube-shorts hidden' });
   const grid = h('div', { class: 'tube-grid' });
-  const scroll = h('div', { class: 'tube-scroll' }, heading, status, chips, grid);
+  const scroll = h('div', { class: 'tube-scroll' }, heading, status, chips, shortsShelf, grid);
 
   // ---- player ----
   const video = h('video', { class: 'tube-media', controls: true, playsinline: true });
@@ -203,6 +205,7 @@ function mountTube(win) {
     qualitySel.replaceChildren(h('option', { value: '' }, 'Auto quality'));
     scroll.classList.add('hidden');
     watchView.classList.remove('hidden');
+    watchView.classList.toggle('tube-watch-shorts', current.kind === 'short');
     nowTitle.textContent = current.title;
     nowMeta.textContent = [current.views, current.published].filter(Boolean).join(' · ');
     nowChannel.textContent = current.channel || '';
@@ -420,14 +423,17 @@ function mountTube(win) {
     if (view === 'playlist') openPlaylist(p.id);
   }
 
+  const thumbURL = (r) => `/api/youtube/thumb?id=${encodeURIComponent(r.thumb || r.id)}`;
+
   function card(r, list) {
+    if (r.kind === 'playlist') return playlistCard(r);
     const save = h('button', {
       type: 'button', class: 'tube-save', title: 'Save to playlist', 'aria-label': 'Save to playlist',
       onclick: (e) => { e.stopPropagation(); openSaveMenu(r, e.currentTarget); },
     }, icon('bookmark', 15));
     return h('div', { class: 'tube-card' },
       h('button', { type: 'button', class: 'tube-thumbbtn', onclick: () => play(r, list) },
-        h('img', { src: `/api/youtube/thumb?id=${encodeURIComponent(r.id)}`, alt: '', loading: 'lazy' }),
+        h('img', { src: thumbURL(r), alt: '', loading: 'lazy' }),
         r.live ? h('span', { class: 'tube-dur tube-live-badge' }, 'LIVE') : (r.duration ? h('span', { class: 'tube-dur' }, r.duration) : null),
         save),
       h('div', { class: 'tube-card-meta' },
@@ -441,14 +447,46 @@ function mountTube(win) {
           h('span', { class: 'set-desc' }, [r.views, r.published].filter(Boolean).join(' · ')))));
   }
 
+  function playlistCard(r) {
+    return h('div', { class: 'tube-card' },
+      h('button', { type: 'button', class: 'tube-thumbbtn', onclick: () => openSearchPlaylist(r) },
+        h('img', { src: thumbURL(r), alt: '', loading: 'lazy' }),
+        h('span', { class: 'tube-dur tube-playlist-badge' }, icon('listVideo', 12),
+          r.count ? ` Playlist · ${r.count}` : ' Playlist')),
+      h('div', { class: 'tube-card-meta' },
+        h('span', { class: 'tube-avatar' }, (r.channel || '?').trim().charAt(0).toUpperCase() || '?'),
+        h('div', { class: 'tube-card-text' },
+          h('button', { type: 'button', class: 'tube-card-title', onclick: () => openSearchPlaylist(r) }, r.title),
+          r.channel ? h('span', { class: 'set-desc' }, r.channel) : null,
+          h('span', { class: 'set-desc' }, 'Playlist'))));
+  }
+
+  function shortCard(r, list) {
+    return h('div', { class: 'tube-short-card' },
+      h('button', { type: 'button', class: 'tube-short-thumb', onclick: () => play(r, list) },
+        h('img', { src: thumbURL(r), alt: '', loading: 'lazy' }),
+        h('span', { class: 'tube-dur tube-shorts-badge' }, 'Shorts')),
+      h('button', { type: 'button', class: 'tube-short-title', onclick: () => play(r, list) }, r.title),
+      r.views ? h('span', { class: 'set-desc' }, r.views) : null);
+  }
+
   function renderGrid(list, emptyMsg) {
     grid.replaceChildren();
+    shortsShelf.replaceChildren();
+    shortsShelf.classList.add('hidden');
+    const shorts = list.filter((r) => r.kind === 'short');
+    const rest = list.filter((r) => r.kind !== 'short');
     if (!list.length) {
       status.textContent = emptyMsg || 'Nothing here yet.';
       return;
     }
     status.textContent = '';
-    grid.append(...list.map((r) => card(r, list)));
+    if (shorts.length) {
+      shortsShelf.classList.remove('hidden');
+      shortsShelf.append(h('h3', { class: 'tube-shorts-title' }, icon('flame', 15), ' Shorts'),
+        h('div', { class: 'tube-shorts-row' }, ...shorts.map((r) => shortCard(r, shorts))));
+    }
+    grid.append(...rest.map((r) => card(r, rest)));
   }
 
   function setChips(cats) {
@@ -470,6 +508,8 @@ function mountTube(win) {
     heading.textContent = title;
     status.textContent = 'Loading…';
     grid.replaceChildren();
+    shortsShelf.replaceChildren();
+    shortsShelf.classList.add('hidden');
     chips.replaceChildren();
     setActiveTab();
     content.scrollTop = 0;
@@ -620,6 +660,42 @@ function mountTube(win) {
         }, icon('trash', 13))))));
   }
 
+  // A playlist found in search: show it right away, with a Save button so it
+  // only joins the library when asked (opening and saving are one tap apart).
+  async function openSearchPlaylist(r) {
+    const saved = data.playlists.find((x) => x.yt === r.id);
+    if (saved) { openPlaylist(saved.id); return; }
+    view = 'playlist';
+    beginLoad(r.title || 'Playlist');
+    try {
+      const info = await api('GET', `/api/youtube/playlist?id=${encodeURIComponent(r.id)}`);
+      if (view !== 'playlist') return;
+      const temp = { id: '', name: info.title || r.title || 'Playlist', yt: info.id, videos: (info.results || []).map(clean) };
+      if (info.title) heading.textContent = info.title;
+      chips.replaceChildren(
+        h('button', { class: 'btn small', type: 'button', onclick: showPlaylists }, icon('chevronLeft', 14), 'Playlists'),
+        h('button', {
+          class: 'btn small primary', type: 'button', disabled: !temp.videos.length,
+          onclick: () => { if (temp.videos.length) play(temp.videos[0], temp.videos); },
+        }, icon('play', 13), 'Play all'),
+        h('button', {
+          class: 'btn small', type: 'button',
+          onclick: (e) => {
+            const p = { id: `p${Date.now().toString(36)}`, ...temp };
+            data.playlists = [...data.playlists, p];
+            persist();
+            e.currentTarget.textContent = 'Saved ✓';
+            e.currentTarget.disabled = true;
+            toast('Playlist saved.');
+          },
+        }, icon('bookmark', 13), 'Save playlist'),
+        ...(info.count ? [h('span', { class: 'set-desc' }, info.count)] : []));
+      renderGrid(temp.videos, 'This playlist has no playable videos.');
+    } catch (err) {
+      status.textContent = err.message || 'Could not open that playlist.';
+    }
+  }
+
   function openPlaylist(pid) {
     const p = data.playlists.find((x) => x.id === pid);
     if (!p) { showPlaylists(); return; }
@@ -631,7 +707,7 @@ function mountTube(win) {
         class: 'btn small primary', type: 'button', disabled: !p.videos.length,
         onclick: () => { if (p.videos.length) play(p.videos[0], p.videos); },
       }, icon('play', 13), 'Play all'),
-      p.yt ? h('button', {
+      ...(p.yt ? [h('button', {
         class: 'btn small', type: 'button',
         onclick: async () => {
           status.textContent = 'Refreshing…';
@@ -643,7 +719,7 @@ function mountTube(win) {
             openPlaylist(p.id);
           } catch (err) { status.textContent = err.message || 'Refresh failed.'; }
         },
-      }, icon('history', 13), 'Refresh') : null);
+      }, icon('history', 13), 'Refresh')] : []));
     renderGrid(p.videos, 'This playlist is empty. Save videos with the bookmark button.');
   }
 
@@ -707,11 +783,35 @@ function mountTube(win) {
     try {
       const res = await api('GET', `/api/youtube/search?q=${encodeURIComponent(query)}&region=${region()}`);
       if (view !== 'search') return;
-      renderGrid((res.results || []).map(clean), 'Nothing found.');
+      renderSearchFilters((res.results || []).map(clean));
     } catch (err) {
       status.textContent = err.message || 'Search failed.';
       if (err) report(err);
     }
+  }
+
+  // Search results mix videos, Shorts and playlists; these chips slice them.
+  function renderSearchFilters(list) {
+    const groups = [
+      ['All', list],
+      ['Videos', list.filter((r) => r.kind === 'video')],
+      ['Shorts', list.filter((r) => r.kind === 'short')],
+      ['Playlists', list.filter((r) => r.kind === 'playlist')],
+    ].filter(([, items]) => items.length);
+    if (groups.length <= 2) { renderGrid(list, 'Nothing found.'); return; }
+    const draw = (items, btn) => {
+      chips.querySelectorAll('.tube-chip').forEach((c) => c.classList.remove('active'));
+      btn?.classList.add('active');
+      renderGrid(items, 'Nothing in this slice.');
+    };
+    chips.replaceChildren(...groups.map(([label, items], i) => {
+      const b = h('button', {
+        type: 'button', class: `tube-chip${i === 0 ? ' active' : ''}`,
+        onclick: () => draw(items, b),
+      }, `${label} · ${items.length}`);
+      return b;
+    }));
+    renderGrid(list, 'Nothing found.');
   }
 
   function show(tab) {

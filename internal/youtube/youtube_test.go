@@ -81,13 +81,34 @@ const lockupFixture = `{"contents": [{"lockupViewModel": {"contentId": "d3QQHqRm
 
 func TestParseLockups(t *testing.T) {
 	got := parseSearch([]byte(lockupFixture))
-	if len(got) != 1 {
-		t.Fatalf("results = %+v (playlist lockups must be skipped)", got)
+	if len(got) != 2 {
+		t.Fatalf("results = %+v (want one video and one playlist)", got)
 	}
 	r := got[0]
-	if r.Title != "A New Format Video" || r.Duration != "1:13" || r.Views != "129K views" ||
+	if r.Kind != "video" || r.Title != "A New Format Video" || r.Duration != "1:13" || r.Views != "129K views" ||
 		r.Published != "8 days ago" || r.Channel != "Some Channel" {
 		t.Fatalf("result = %+v", r)
+	}
+	p := got[1]
+	if p.Kind != "playlist" || p.ID != "PLxxxxxxxxxxxx" || p.Title != "A Playlist" {
+		t.Fatalf("playlist = %+v", p)
+	}
+}
+
+const shortsFixture = `{"contents": [{"shortsLockupViewModel": {
+  "entityId": "shorts-shelf-item-abc123XYZ_-",
+  "accessibilityText": "Funny Cat Moments, 1.2 million views - play Short",
+  "onTap": {"innertubeCommand": {"reelWatchEndpoint": {"videoId": "abc123XYZ_-"}}}
+}}]}`
+
+func TestParseShorts(t *testing.T) {
+	got := parseSearch([]byte(shortsFixture))
+	if len(got) != 1 {
+		t.Fatalf("results = %+v", got)
+	}
+	r := got[0]
+	if r.Kind != "short" || r.ID != "abc123XYZ_-" || r.Title != "Funny Cat Moments" || r.Views != "1.2 million views" {
+		t.Fatalf("short = %+v", r)
 	}
 }
 

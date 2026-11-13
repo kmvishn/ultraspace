@@ -34,9 +34,12 @@ var idRE = regexp.MustCompile(`^[A-Za-z0-9_-]{6,20}$`)
 
 func validID(id string) bool { return idRE.MatchString(id) }
 
-// Result is one video in a search listing.
+// Result is one item in a listing: a video, a Short, or a playlist.
+// For playlists, ID is the playlist id and Thumb is a video id whose
+// thumbnail represents it.
 type Result struct {
 	ID        string `json:"id"`
+	Kind      string `json:"kind"` // "video", "short" or "playlist"
 	Title     string `json:"title"`
 	Channel   string `json:"channel"`
 	ChannelID string `json:"channel_id"`
@@ -44,6 +47,8 @@ type Result struct {
 	Views     string `json:"views"`
 	Published string `json:"published"`
 	Live      bool   `json:"live"`
+	Count     string `json:"count,omitempty"`
+	Thumb     string `json:"thumb,omitempty"`
 }
 
 // Format is one playable stream.
@@ -369,7 +374,7 @@ func (c *Client) Related(ctx context.Context, id string) ([]Result, error) {
 	out := parseSearch(raw)
 	kept := out[:0]
 	for _, r := range out {
-		if r.ID != id {
+		if r.ID != id && r.Kind != "playlist" {
 			kept = append(kept, r)
 		}
 	}
@@ -426,14 +431,20 @@ func parseSearch(raw []byte) []Result {
 		switch t := v.(type) {
 		case map[string]any:
 			if vr, ok := t["videoRenderer"].(map[string]any); ok {
-				if r, ok := readRenderer(vr); ok && !seen[r.ID] {
-					seen[r.ID] = true
+				if r, ok := readRenderer(vr); ok && !seen[r.Kind+r.ID] {
+					seen[r.Kind+r.ID] = true
 					out = append(out, r)
 				}
 			}
 			if lk, ok := t["lockupViewModel"].(map[string]any); ok {
-				if r, ok := readLockup(lk); ok && !seen[r.ID] {
-					seen[r.ID] = true
+				if r, ok := readLockup(lk); ok && !seen[r.Kind+r.ID] {
+					seen[r.Kind+r.ID] = true
+					out = append(out, r)
+				}
+			}
+			if sk, ok := t["shortsLockupViewModel"].(map[string]any); ok {
+				if r, ok := readShortsLockup(sk); ok && !seen[r.Kind+r.ID] {
+					seen[r.Kind+r.ID] = true
 					out = append(out, r)
 				}
 			}
@@ -481,16 +492,30 @@ func mapAt(m map[string]any, path ...string) map[string]any {
 	return cur
 }
 
-// readLockup reads one lockupViewModel (the current video card format).
+var thumbIDRE = regexp.MustCompile(`/vi/([A-Za-z0-9_-]{6,20})/`)
+
+// readLockup reads one lockupViewModel (the current card format): a video,
+// a Short, or a playlist.
 func readLockup(lk map[string]any) (Result, bool) {
-	if t, _ := lk["contentType"].(string); t != "" && t != "LOCKUP_CONTENT_TYPE_VIDEO" {
+	kind := "video"
+	switch t, _ := lk["contentType"].(string); t {
+	case "", "LOCKUP_CONTENT_TYPE_VIDEO":
+	case "LOCKUP_CONTENT_TYPE_SHORTS":
+		kind = "short"
+	case "LOCKUP_CONTENT_TYPE_PLAYLIST":
+		kind = "playlist"
+	default:
 		return Result{}, false
 	}
 	id, _ := lk["contentId"].(string)
-	if !validID(id) {
+	if kind == "playlist" {
+		if _, ok := playlistIDFrom(id); !ok {
+			return Result{}, false
+		}
+	} else if !validID(id) {
 		return Result{}, false
 	}
-	r := Result{ID: id}
+	r := Result{ID: id, Kind: kind}
 	meta := mapAt(lk, "metadata", "lockupMetadataViewModel")
 	if title := mapAt(meta, "title"); title != nil {
 		r.Title, _ = title["content"].(string)
@@ -545,6 +570,44 @@ func readLockup(lk map[string]any) (Result, bool) {
 			r.Duration = s
 		}
 	})
+	if kind == "playlist" {
+		// The card thumbnail is a collage; borrow its first video's id.
+		if raw, err := json.Marshal(lk); err == nil {
+			if m := thumbIDRE.FindSubmatch(raw); m != nil {
+				r.Thumb = string(m[1])
+			}
+		}
+	}
+	return r, r.Title != ""
+}
+
+var shortViewsRE = regexp.MustCompile(`^(.*), ([\d.,]+ ?[KMB]? ?(?:million|billion|thousand)? ?views) - play Short$`)
+
+// readShortsLockup reads one Short from a search shelf: it carries no clean
+// title field, so title and views come from its accessibility text.
+func readShortsLockup(sk map[string]any) (Result, bool) {
+	var id string
+	walkRenderers(sk, "reelWatchEndpoint", func(m map[string]any) {
+		if id == "" {
+			id, _ = m["videoId"].(string)
+		}
+	})
+	if id == "" {
+		if eid, _ := sk["entityId"].(string); strings.HasPrefix(eid, "shorts-shelf-item-") {
+			id = strings.TrimPrefix(eid, "shorts-shelf-item-")
+		}
+	}
+	if !validID(id) {
+		return Result{}, false
+	}
+	r := Result{ID: id, Kind: "short"}
+	if text, _ := sk["accessibilityText"].(string); text != "" {
+		if m := shortViewsRE.FindStringSubmatch(text); m != nil {
+			r.Title, r.Views = m[1], m[2]
+		} else {
+			r.Title = strings.TrimSuffix(text, " - play Short")
+		}
+	}
 	return r, r.Title != ""
 }
 
@@ -560,8 +623,13 @@ func readRenderer(vr map[string]any) (Result, bool) {
 	if !validID(id) {
 		return Result{}, false
 	}
-	r := Result{ID: id, Title: runsText(vr["title"]), Duration: simpleText(vr["lengthText"]),
+	r := Result{ID: id, Kind: "video", Title: runsText(vr["title"]), Duration: simpleText(vr["lengthText"]),
 		Views: simpleText(vr["viewCountText"]), Published: simpleText(vr["publishedTimeText"])}
+	if nav, ok := vr["navigationEndpoint"].(map[string]any); ok {
+		if _, isShort := nav["reelWatchEndpoint"]; isShort {
+			r.Kind = "short"
+		}
+	}
 	if byline, ok := vr["shortBylineText"].(map[string]any); ok {
 		if runs, ok := byline["runs"].([]any); ok && len(runs) > 0 {
 			if first, ok := runs[0].(map[string]any); ok {
